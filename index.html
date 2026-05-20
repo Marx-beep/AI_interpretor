@@ -1,0 +1,160 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI 同声口译台</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&family=Outfit:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">AI INTERPRETING CONSOLE</p>
+        <h1>人机口译三屏工作台</h1>
+        <p class="hero-copy">左侧导入原音频，中间进行实时语音录入，右侧同步做转写对照、英文转中文与摘要提炼，适合同传训练与人机协作演练。</p>
+      </div>
+      <section class="config-card">
+        <h2>模型配置</h2>
+        <div class="config-grid">
+          <label>
+            API Base URL
+            <input id="apiBase" placeholder="https://api.openai.com/v1" />
+          </label>
+          <label>
+            API Key
+            <input id="apiKey" type="password" placeholder="sk-..." />
+          </label>
+          <label>
+            转写模型
+            <input id="transcriptionModel" placeholder="whisper-1" />
+          </label>
+          <label>
+            总结模型
+            <input id="chatModel" placeholder="gpt-4o-mini" />
+          </label>
+        </div>
+        <div class="config-actions">
+          <button id="saveConfigBtn" class="ghost-btn">保存本地配置</button>
+          <span id="configStatus" class="status-text">未保存</span>
+        </div>
+      </section>
+    </header>
+
+    <main class="workspace">
+      <section class="panel panel-audio">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">Panel A</p>
+            <h2>上传原始音频</h2>
+          </div>
+          <span id="uploadStatus" class="badge">等待上传</span>
+        </div>
+
+        <label class="upload-dropzone" for="audioFileInput">
+          <input id="audioFileInput" type="file" accept="audio/*" hidden />
+          <strong>点击或拖拽音频文件到这里</strong>
+          <span>支持常见音频格式，上传后自动尝试英文转写。</span>
+        </label>
+
+        <audio id="audioPlayer" controls class="audio-player"></audio>
+
+        <div class="action-row">
+          <button id="transcribeAudioBtn">转写上传音频</button>
+          <button id="translateAudioBtn" class="ghost-btn">翻译与总结</button>
+        </div>
+
+        <article class="content-card">
+          <div class="content-head">
+            <h3>原音频英文转写</h3>
+            <span id="audioWordCount">0 words</span>
+          </div>
+          <textarea id="audioTranscript" placeholder="上传音频后，这里会显示英文转写结果。"></textarea>
+        </article>
+      </section>
+
+      <section class="panel panel-live">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">Panel B</p>
+            <h2>实时语音录入</h2>
+          </div>
+          <span id="micStatus" class="badge muted">麦克风空闲</span>
+        </div>
+
+        <div class="meter-card">
+          <div class="meter-top">
+            <span>录入计时</span>
+            <strong id="recordingTimer">00:00</strong>
+          </div>
+          <div class="mic-actions">
+            <button id="startMicBtn">开始录入</button>
+            <button id="stopMicBtn" class="ghost-btn">停止</button>
+            <button id="clearMicBtn" class="ghost-btn">清空</button>
+          </div>
+          <p class="hint">优先使用浏览器语音识别；若浏览器不支持，可先录音再接入后端流式 ASR。</p>
+        </div>
+
+        <article class="content-card">
+          <div class="content-head">
+            <h3>实时英文录入</h3>
+            <span id="liveWordCount">0 words</span>
+          </div>
+          <textarea id="liveTranscript" placeholder="点击开始录入，英文识别内容会实时追加在这里。"></textarea>
+        </article>
+
+        <article class="content-card compact-card">
+          <div class="content-head">
+            <h3>即时中文口译</h3>
+            <span id="translationStatus">待生成</span>
+          </div>
+          <textarea id="translatedChinese" placeholder="系统会基于英文内容生成中文译文。"></textarea>
+        </article>
+      </section>
+
+      <section class="panel panel-compare">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">Panel C</p>
+            <h2>对比与信息提炼</h2>
+          </div>
+          <span id="compareScore" class="badge">相似度 --</span>
+        </div>
+
+        <div class="comparison-grid">
+          <article class="mini-card">
+            <h3>差异提示</h3>
+            <div id="differenceList" class="bullet-block">等待两侧文本生成后自动对比。</div>
+          </article>
+          <article class="mini-card">
+            <h3>内容摘要</h3>
+            <div id="summaryOutput" class="bullet-block">翻译完成后输出中文摘要。</div>
+          </article>
+        </div>
+
+        <article class="content-card fill-card">
+          <div class="content-head">
+            <h3>双文本对照</h3>
+            <button id="runCompareBtn" class="ghost-btn">立即刷新对比</button>
+          </div>
+          <div class="compare-columns">
+            <div>
+              <h4>原音频文本</h4>
+              <div id="audioTranscriptMirror" class="mirror-box"></div>
+            </div>
+            <div>
+              <h4>实时录入文本</h4>
+              <div id="liveTranscriptMirror" class="mirror-box"></div>
+            </div>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
