@@ -1,0 +1,42 @@
+{
+  "name": "ai-interpreting-console",
+  "version": "1.0.0",
+  "description": "Desktop app for simultaneous interpreting practice and AI-assisted translation.",
+  "main": "main.js",
+  "author": "OpenAI Codex",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis portable"
+  },
+  "build": {
+    "appId": "com.eason.aiinterpreting",
+    "productName": "AI同声口译台",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "index.html",
+      "styles.css",
+      "app.js",
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    }
+  },
+  "devDependencies": {
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12"
+  }
+}
