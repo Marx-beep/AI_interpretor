@@ -14,12 +14,22 @@
     <header class="hero">
       <div>
         <p class="eyebrow">AI INTERPRETING CONSOLE</p>
-        <h1>人机口译三屏工作台</h1>
-        <p class="hero-copy">左侧导入原音频，中间进行实时语音录入，右侧同步做转写对照、英文转中文与摘要提炼，适合同传训练与人机协作演练。</p>
+        <h1>中英双向口译训练台</h1>
+        <p class="hero-copy">上传音频或视频后，系统自动完成源语重述与机器标准译文。你用麦克风完成个人口译，录音结束后再揭晓标准答案与准确度评分。</p>
       </div>
       <section class="config-card">
         <h2>模型配置</h2>
         <div class="config-grid">
+          <label>
+            供应商预设
+            <select id="providerPreset">
+              <option value="openai">OpenAI</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="dashscope">阿里云百炼（DashScope）</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="custom">自定义</option>
+            </select>
+          </label>
           <label>
             API Base URL
             <input id="apiBase" placeholder="https://api.openai.com/v1" />
@@ -29,14 +39,12 @@
             <input id="apiKey" type="password" placeholder="sk-..." />
           </label>
           <label>
-            转写模型
-            <input id="transcriptionModel" placeholder="whisper-1" />
-          </label>
-          <label>
-            总结模型
-            <input id="chatModel" placeholder="gpt-4o-mini" />
+            统一模型（转写+重述+翻译）
+            <input id="modelName" list="modelOptions" placeholder="例如 gpt-4o-mini-transcribe" />
+            <datalist id="modelOptions"></datalist>
           </label>
         </div>
+        <p id="providerHint" class="hint">选择供应商后将自动填充推荐 URL 与模型。</p>
         <div class="config-actions">
           <button id="saveConfigBtn" class="ghost-btn">保存本地配置</button>
           <span id="configStatus" class="status-text">未保存</span>
@@ -49,30 +57,55 @@
         <div class="panel-head">
           <div>
             <p class="panel-kicker">Panel A</p>
-            <h2>上传原始音频</h2>
+            <h2>上传音频/视频</h2>
           </div>
           <span id="uploadStatus" class="badge">等待上传</span>
         </div>
 
-        <label class="upload-dropzone" for="audioFileInput">
-          <input id="audioFileInput" type="file" accept="audio/*" hidden />
-          <strong>点击或拖拽音频文件到这里</strong>
-          <span>支持常见音频格式，上传后自动尝试英文转写。</span>
+        <label class="upload-dropzone" for="mediaFileInput">
+          <input id="mediaFileInput" type="file" accept="audio/*,video/*" hidden />
+          <strong>点击或拖拽音频/视频到这里</strong>
+          <span>支持 mp3/mp4/m4a/wav/webm 等格式。</span>
         </label>
 
-        <audio id="audioPlayer" controls class="audio-player"></audio>
+        <audio id="audioPlayer" controls class="audio-player" hidden></audio>
+        <video id="videoPlayer" controls class="audio-player" hidden></video>
 
         <div class="action-row">
-          <button id="transcribeAudioBtn">转写上传音频</button>
-          <button id="translateAudioBtn" class="ghost-btn">翻译与总结</button>
+          <button id="transcribeAudioBtn">生成源语重述</button>
+          <button id="translateAudioBtn" class="ghost-btn">生成机器译文</button>
+        </div>
+
+        <label class="cheat-guard-toggle">
+          <input id="antiCheatMode" type="checkbox" checked />
+          <span>防作弊模式（录音期间隐藏标准答案，结束后揭晓）</span>
+        </label>
+
+        <div class="comparison-grid language-grid">
+          <article class="mini-card">
+            <h3>源语</h3>
+            <div id="sourceLanguageLabel" class="bullet-block">未识别</div>
+          </article>
+          <article class="mini-card">
+            <h3>目标语</h3>
+            <div id="targetLanguageLabel" class="bullet-block">未生成</div>
+          </article>
         </div>
 
         <article class="content-card">
           <div class="content-head">
-            <h3>原音频英文转写</h3>
-            <span id="audioWordCount">0 words</span>
+            <h3>源语重述</h3>
+            <span id="audioWordCount">0 tokens</span>
           </div>
-          <textarea id="audioTranscript" placeholder="上传音频后，这里会显示英文转写结果。"></textarea>
+          <textarea id="audioTranscript" placeholder="这里会在可展示时显示源语重述。"></textarea>
+        </article>
+
+        <article class="content-card compact-card">
+          <div class="content-head">
+            <h3>机器标准译文</h3>
+            <span id="translationStatus">待生成</span>
+          </div>
+          <textarea id="machineTranslation" placeholder="这里会在可展示时显示机器标准译文。"></textarea>
         </article>
       </section>
 
@@ -80,7 +113,7 @@
         <div class="panel-head">
           <div>
             <p class="panel-kicker">Panel B</p>
-            <h2>实时语音录入</h2>
+            <h2>麦克风个人口译</h2>
           </div>
           <span id="micStatus" class="badge muted">麦克风空闲</span>
         </div>
@@ -90,28 +123,36 @@
             <span>录入计时</span>
             <strong id="recordingTimer">00:00</strong>
           </div>
+          <label>
+            麦克风识别语言
+            <select id="micInputLanguage">
+              <option value="auto">自动（按目标语）</option>
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+            </select>
+          </label>
           <div class="mic-actions">
             <button id="startMicBtn">开始录入</button>
             <button id="stopMicBtn" class="ghost-btn">停止</button>
             <button id="clearMicBtn" class="ghost-btn">清空</button>
           </div>
-          <p class="hint">优先使用浏览器语音识别；若浏览器不支持，可先录音再接入后端流式 ASR。</p>
+          <p class="hint">你应当用目标语做口译，系统会与机器标准译文进行相似度评分。</p>
         </div>
 
         <article class="content-card">
           <div class="content-head">
-            <h3>实时英文录入</h3>
-            <span id="liveWordCount">0 words</span>
+            <h3>个人口译文本</h3>
+            <span id="liveWordCount">0 tokens</span>
           </div>
-          <textarea id="liveTranscript" placeholder="点击开始录入，英文识别内容会实时追加在这里。"></textarea>
+          <textarea id="liveTranscript" placeholder="点击开始录入，口译文本会实时追加在这里。"></textarea>
         </article>
 
         <article class="content-card compact-card">
           <div class="content-head">
-            <h3>即时中文口译</h3>
-            <span id="translationStatus">待生成</span>
+            <h3>识别语言</h3>
+            <span id="liveDetectedLanguage" class="badge muted">未识别</span>
           </div>
-          <textarea id="translatedChinese" placeholder="系统会基于英文内容生成中文译文。"></textarea>
+          <textarea id="liveInterpretingNote" readonly placeholder="这里会显示训练反馈与建议。"></textarea>
         </article>
       </section>
 
@@ -119,7 +160,7 @@
         <div class="panel-head">
           <div>
             <p class="panel-kicker">Panel C</p>
-            <h2>对比与信息提炼</h2>
+            <h2>口译评分与差异分析</h2>
           </div>
           <span id="compareScore" class="badge">相似度 --</span>
         </div>
@@ -127,26 +168,26 @@
         <div class="comparison-grid">
           <article class="mini-card">
             <h3>差异提示</h3>
-            <div id="differenceList" class="bullet-block">等待两侧文本生成后自动对比。</div>
+            <div id="differenceList" class="bullet-block">等待录音结束后自动对比。</div>
           </article>
           <article class="mini-card">
-            <h3>内容摘要</h3>
-            <div id="summaryOutput" class="bullet-block">翻译完成后输出中文摘要。</div>
+            <h3>训练反馈</h3>
+            <div id="summaryOutput" class="bullet-block">等待评分完成。</div>
           </article>
         </div>
 
         <article class="content-card fill-card">
           <div class="content-head">
-            <h3>双文本对照</h3>
+            <h3>标准译文 vs 个人口译</h3>
             <button id="runCompareBtn" class="ghost-btn">立即刷新对比</button>
           </div>
           <div class="compare-columns">
             <div>
-              <h4>原音频文本</h4>
+              <h4>机器标准译文</h4>
               <div id="audioTranscriptMirror" class="mirror-box"></div>
             </div>
             <div>
-              <h4>实时录入文本</h4>
+              <h4>个人口译文本</h4>
               <div id="liveTranscriptMirror" class="mirror-box"></div>
             </div>
           </div>

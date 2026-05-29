@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+﻿const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const path = require("node:path");
 
 function createWindow() {
@@ -41,33 +41,58 @@ app.on("window-all-closed", () => {
   }
 });
 
-ipcMain.handle("transcribe-audio", async (_, payload) => {
-  const { apiBase, apiKey, model, fileName, mimeType, bytes } = payload;
-  const file = new File([Buffer.from(bytes)], fileName, { type: mimeType || "audio/mpeg" });
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("model", model);
-  formData.append("language", "en");
-  formData.append("response_format", "json");
+async function transcribeWithRetry({ apiBase, apiKey, model, fileName, mimeType, bytes }) {
+  const endpoint = `${apiBase.replace(/\/$/, "")}/audio/transcriptions`;
+  const binary = Buffer.from(bytes);
 
-  const response = await fetch(`${apiBase.replace(/\/$/, "")}/audio/transcriptions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: formData,
-  });
+  async function doRequest(responseFormat) {
+    const file = new File([binary], fileName, { type: mimeType || "application/octet-stream" });
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("model", model);
+    formData.append("response_format", responseFormat);
 
-  if (!response.ok) {
-    throw new Error(`转写失败：${response.status}`);
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(`转写失败：${response.status} ${detail}`);
+    }
+
+    return responseFormat === "text" ? { text: await response.text() } : response.json();
   }
 
-  return response.json();
+  const is4oTranscribe = /gpt-4o(-mini)?-transcribe/i.test(model);
+  if (is4oTranscribe) {
+    return doRequest("json");
+  }
+
+  try {
+    return await doRequest("verbose_json");
+  } catch {
+    return doRequest("json");
+  }
+}
+
+ipcMain.handle("transcribe-audio", async (_, payload) => {
+  return transcribeWithRetry(payload);
 });
 
-ipcMain.handle("translate-and-summarize", async (_, payload) => {
-  const { apiBase, apiKey, model, sourceText } = payload;
-  const prompt = `You are assisting a simultaneous interpreting practice dashboard.\nTranslate the English content into natural Chinese.\nThen provide a concise Chinese summary with 3 bullet points.\nReturn strict JSON with keys translation and summary. summary must be an array of strings.\nEnglish content:\n${sourceText}`;
+ipcMain.handle("chat-completion", async (_, payload) => {
+  const {
+    apiBase,
+    apiKey,
+    model,
+    messages,
+    responseFormatJson = true,
+    temperature = 0.2,
+  } = payload;
 
   const response = await fetch(`${apiBase.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
@@ -77,17 +102,15 @@ ipcMain.handle("translate-and-summarize", async (_, payload) => {
     },
     body: JSON.stringify({
       model,
-      temperature: 0.2,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: "Return concise and accurate JSON only." },
-        { role: "user", content: prompt },
-      ],
+      temperature,
+      response_format: responseFormatJson ? { type: "json_object" } : undefined,
+      messages,
     }),
   });
 
   if (!response.ok) {
-    throw new Error(`翻译失败：${response.status}`);
+    const detail = await response.text();
+    throw new Error(`文本生成失败：${response.status} ${detail}`);
   }
 
   return response.json();

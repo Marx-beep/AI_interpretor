@@ -2,87 +2,156 @@
 
 const state = {
   uploadedFile: null,
-  audioTranscript: "",
+  sourceLanguage: "unknown",
+  targetLanguage: "unknown",
+  sourceRestatement: "",
+  machineTranslation: "",
   liveTranscript: "",
+  liveDetectedLanguage: "unknown",
+  hasRecordingStarted: false,
+  hasRecordingCompleted: false,
   recognition: null,
   isRecognizing: false,
   timerId: null,
   recordingSeconds: 0,
+  translationTips: [],
+};
+
+const providerPresets = {
+  openai: {
+    name: "OpenAI",
+    apiBase: "https://api.openai.com/v1",
+    models: ["gpt-4o-mini-transcribe", "gpt-4o-transcribe", "whisper-1"],
+    hint: "官方推荐：语音转写可用 gpt-4o-mini-transcribe 或 whisper-1。",
+  },
+  deepseek: {
+    name: "DeepSeek",
+    apiBase: "https://api.deepseek.com",
+    models: ["deepseek-chat", "deepseek-reasoner"],
+    hint: "DeepSeek 当前以文本模型为主；音视频转写能力依赖其兼容接口实际支持情况。",
+  },
+  dashscope: {
+    name: "阿里云百炼",
+    apiBase: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    models: ["qwen-plus", "qwen-turbo", "qwen-max"],
+    hint: "使用百炼 OpenAI 兼容模式；请在阿里云侧开通对应模型。",
+  },
+  openrouter: {
+    name: "OpenRouter",
+    apiBase: "https://openrouter.ai/api/v1",
+    models: ["openai/gpt-4o-mini-transcribe", "deepseek/deepseek-chat"],
+    hint: "OpenRouter 为聚合网关，模型可按账号权限使用。",
+  },
+  custom: {
+    name: "自定义",
+    apiBase: "",
+    models: [],
+    hint: "可手动填写 OpenAI 兼容网关 URL 与模型。",
+  },
 };
 
 const el = {
+  providerPreset: document.getElementById("providerPreset"),
   apiBase: document.getElementById("apiBase"),
   apiKey: document.getElementById("apiKey"),
-  transcriptionModel: document.getElementById("transcriptionModel"),
-  chatModel: document.getElementById("chatModel"),
+  modelName: document.getElementById("modelName"),
+  modelOptions: document.getElementById("modelOptions"),
+  providerHint: document.getElementById("providerHint"),
   saveConfigBtn: document.getElementById("saveConfigBtn"),
   configStatus: document.getElementById("configStatus"),
-  audioFileInput: document.getElementById("audioFileInput"),
+
+  mediaFileInput: document.getElementById("mediaFileInput"),
   audioPlayer: document.getElementById("audioPlayer"),
+  videoPlayer: document.getElementById("videoPlayer"),
   uploadStatus: document.getElementById("uploadStatus"),
   transcribeAudioBtn: document.getElementById("transcribeAudioBtn"),
   translateAudioBtn: document.getElementById("translateAudioBtn"),
+  antiCheatMode: document.getElementById("antiCheatMode"),
+
+  sourceLanguageLabel: document.getElementById("sourceLanguageLabel"),
+  targetLanguageLabel: document.getElementById("targetLanguageLabel"),
   audioTranscript: document.getElementById("audioTranscript"),
+  machineTranslation: document.getElementById("machineTranslation"),
   audioWordCount: document.getElementById("audioWordCount"),
+  translationStatus: document.getElementById("translationStatus"),
+
   startMicBtn: document.getElementById("startMicBtn"),
   stopMicBtn: document.getElementById("stopMicBtn"),
   clearMicBtn: document.getElementById("clearMicBtn"),
+  micInputLanguage: document.getElementById("micInputLanguage"),
   micStatus: document.getElementById("micStatus"),
+  recordingTimer: document.getElementById("recordingTimer"),
   liveTranscript: document.getElementById("liveTranscript"),
   liveWordCount: document.getElementById("liveWordCount"),
-  translatedChinese: document.getElementById("translatedChinese"),
-  translationStatus: document.getElementById("translationStatus"),
+  liveDetectedLanguage: document.getElementById("liveDetectedLanguage"),
+  liveInterpretingNote: document.getElementById("liveInterpretingNote"),
+
   summaryOutput: document.getElementById("summaryOutput"),
   differenceList: document.getElementById("differenceList"),
   compareScore: document.getElementById("compareScore"),
   audioTranscriptMirror: document.getElementById("audioTranscriptMirror"),
   liveTranscriptMirror: document.getElementById("liveTranscriptMirror"),
   runCompareBtn: document.getElementById("runCompareBtn"),
-  recordingTimer: document.getElementById("recordingTimer"),
 };
+
+function refreshProviderModelOptions(providerKey) {
+  const preset = providerPresets[providerKey] || providerPresets.custom;
+  el.modelOptions.innerHTML = "";
+  preset.models.forEach((model) => {
+    const option = document.createElement("option");
+    option.value = model;
+    el.modelOptions.appendChild(option);
+  });
+  el.providerHint.textContent = preset.hint;
+}
+
+function applyProviderPreset(providerKey, { keepModel = false } = {}) {
+  const preset = providerPresets[providerKey] || providerPresets.custom;
+  if (preset.apiBase) {
+    el.apiBase.value = preset.apiBase;
+  }
+  refreshProviderModelOptions(providerKey);
+  if (!keepModel && preset.models.length > 0) {
+    el.modelName.value = preset.models[0];
+  }
+}
 
 function loadConfig() {
   const saved = localStorage.getItem(storageKey);
   if (!saved) {
+    el.providerPreset.value = "openai";
     el.apiBase.value = "https://api.openai.com/v1";
-    el.transcriptionModel.value = "whisper-1";
-    el.chatModel.value = "gpt-4o-mini";
+    el.modelName.value = "gpt-4o-mini-transcribe";
+    refreshProviderModelOptions("openai");
     return;
   }
 
   try {
     const parsed = JSON.parse(saved);
+    el.providerPreset.value = parsed.providerPreset || "openai";
     el.apiBase.value = parsed.apiBase || "https://api.openai.com/v1";
     el.apiKey.value = parsed.apiKey || "";
-    el.transcriptionModel.value = parsed.transcriptionModel || "whisper-1";
-    el.chatModel.value = parsed.chatModel || "gpt-4o-mini";
+    refreshProviderModelOptions(el.providerPreset.value);
+    el.modelName.value = parsed.modelName || parsed.transcriptionModel || "gpt-4o-mini-transcribe";
     el.configStatus.textContent = "已加载本地配置";
   } catch {
     el.configStatus.textContent = "配置读取失败";
+    el.providerPreset.value = "openai";
+    el.apiBase.value = "https://api.openai.com/v1";
+    el.modelName.value = "gpt-4o-mini-transcribe";
+    refreshProviderModelOptions("openai");
   }
 }
 
 function saveConfig() {
   const payload = {
+    providerPreset: el.providerPreset.value,
     apiBase: el.apiBase.value.trim(),
     apiKey: el.apiKey.value.trim(),
-    transcriptionModel: el.transcriptionModel.value.trim(),
-    chatModel: el.chatModel.value.trim(),
+    modelName: el.modelName.value.trim(),
   };
   localStorage.setItem(storageKey, JSON.stringify(payload));
   el.configStatus.textContent = "已保存到浏览器本地";
-}
-
-function wordCount(text) {
-  const trimmed = text.trim();
-  return trimmed ? trimmed.split(/\s+/).length : 0;
-}
-
-function setTextMetrics() {
-  el.audioWordCount.textContent = `${wordCount(el.audioTranscript.value)} words`;
-  el.liveWordCount.textContent = `${wordCount(el.liveTranscript.value)} words`;
-  el.audioTranscriptMirror.textContent = el.audioTranscript.value || "暂无内容";
-  el.liveTranscriptMirror.textContent = el.liveTranscript.value || "暂无内容";
 }
 
 function formatTime(totalSeconds) {
@@ -106,34 +175,256 @@ function stopTimer() {
   }
 }
 
-function updateComparison() {
-  const left = normalizeText(el.audioTranscript.value);
-  const right = normalizeText(el.liveTranscript.value);
+function normalizeLanguageCode(rawCode) {
+  if (!rawCode) {
+    return "unknown";
+  }
+  const code = String(rawCode).toLowerCase();
+  if (code.startsWith("zh")) {
+    return "zh";
+  }
+  if (code.startsWith("en")) {
+    return "en";
+  }
+  return "unknown";
+}
 
-  if (!left && !right) {
-    el.compareScore.textContent = "相似度 --";
-    el.differenceList.textContent = "等待两侧文本生成后自动对比。";
+function inferLanguageFromText(text) {
+  if (!text) {
+    return "unknown";
+  }
+
+  const zhCount = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+  const enCount = (text.match(/[a-zA-Z]/g) || []).length;
+
+  if (zhCount === 0 && enCount === 0) {
+    return "unknown";
+  }
+  return zhCount >= enCount ? "zh" : "en";
+}
+
+function getTargetLanguage(sourceLanguage) {
+  if (sourceLanguage === "en") {
+    return "zh";
+  }
+  if (sourceLanguage === "zh") {
+    return "en";
+  }
+  return "unknown";
+}
+
+function languageLabel(code) {
+  if (code === "zh") {
+    return "中文";
+  }
+  if (code === "en") {
+    return "English";
+  }
+  return "未识别";
+}
+
+function tokenizeForScore(text, language) {
+  const input = (text || "").trim();
+  if (!input) {
+    return [];
+  }
+
+  const lang = language === "unknown" ? inferLanguageFromText(input) : language;
+  if (lang === "zh") {
+    return input
+      .replace(/[\s，。！？；：、“”‘’（）《》【】,.!?;:'"()\[\]{}]/g, "")
+      .split("")
+      .filter(Boolean);
+  }
+
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+}
+
+function uniqueTokens(tokens) {
+  return [...new Set(tokens)];
+}
+
+function computeJaccardScore(aTokens, bTokens) {
+  const aSet = new Set(aTokens);
+  const bSet = new Set(bTokens);
+  if (!aSet.size && !bSet.size) {
+    return 1;
+  }
+  const intersection = [...aSet].filter((token) => bSet.has(token)).length;
+  const union = new Set([...aSet, ...bSet]).size;
+  return union === 0 ? 0 : intersection / union;
+}
+
+function bigrams(text) {
+  const normalized = (text || "").replace(/\s+/g, "").toLowerCase();
+  if (normalized.length < 2) {
+    return normalized ? [normalized] : [];
+  }
+  const result = [];
+  for (let i = 0; i < normalized.length - 1; i += 1) {
+    result.push(normalized.slice(i, i + 2));
+  }
+  return result;
+}
+
+function computeDiceScore(aText, bText) {
+  const a = bigrams(aText);
+  const b = bigrams(bText);
+  if (!a.length && !b.length) {
+    return 1;
+  }
+  const countMap = new Map();
+  a.forEach((item) => {
+    countMap.set(item, (countMap.get(item) || 0) + 1);
+  });
+
+  let intersection = 0;
+  b.forEach((item) => {
+    const count = countMap.get(item) || 0;
+    if (count > 0) {
+      intersection += 1;
+      countMap.set(item, count - 1);
+    }
+  });
+
+  return (2 * intersection) / (a.length + b.length);
+}
+
+function countTokensForDisplay(text, language) {
+  const tokens = tokenizeForScore(text, language);
+  return tokens.length;
+}
+
+function shouldHideOutputs() {
+  return Boolean(el.antiCheatMode.checked && !state.hasRecordingCompleted);
+}
+
+function refreshLanguagePanels() {
+  el.sourceLanguageLabel.textContent = languageLabel(state.sourceLanguage);
+  el.targetLanguageLabel.textContent = languageLabel(state.targetLanguage);
+  el.liveDetectedLanguage.textContent = languageLabel(state.liveDetectedLanguage);
+  el.liveDetectedLanguage.classList.toggle("muted", state.liveDetectedLanguage === "unknown");
+}
+
+function renderProtectedOutputs() {
+  const hide = shouldHideOutputs();
+  const sourceText = hide && state.sourceRestatement ? "防作弊模式：录音结束后显示源语重述。" : state.sourceRestatement;
+  const machineText = hide && state.machineTranslation ? "防作弊模式：录音结束后显示机器标准译文。" : state.machineTranslation;
+
+  el.audioTranscript.value = sourceText;
+  el.machineTranslation.value = machineText;
+
+  el.audioTranscriptMirror.textContent = machineText || "暂无内容";
+  el.liveTranscriptMirror.textContent = el.liveTranscript.value || "暂无内容";
+
+  const sourceTokens = hide ? countTokensForDisplay(state.sourceRestatement, state.sourceLanguage) : countTokensForDisplay(el.audioTranscript.value, state.sourceLanguage);
+  el.audioWordCount.textContent = `${sourceTokens} tokens`;
+  el.liveWordCount.textContent = `${countTokensForDisplay(el.liveTranscript.value, state.targetLanguage)} tokens`;
+
+  if (hide && state.machineTranslation) {
+    el.translationStatus.textContent = "已生成（防作弊模式暂不显示）";
+  }
+}
+
+function updateComparison() {
+  if (shouldHideOutputs()) {
+    el.compareScore.textContent = "等待录音完成";
+    el.differenceList.textContent = "防作弊模式开启：标准答案与评分将在你停止录音后自动揭晓。";
+    el.summaryOutput.textContent = "请先完成录音，再查看对比与评分。";
+    el.liveInterpretingNote.value = "防作弊模式开启：可先上传并播放媒体，系统会先生成答案但不显示；停止录音后统一展示。";
+    renderProtectedOutputs();
     return;
   }
 
-  const leftWords = new Set(left.split(" ").filter(Boolean));
-  const rightWords = new Set(right.split(" ").filter(Boolean));
-  const intersection = [...leftWords].filter((word) => rightWords.has(word));
-  const union = new Set([...leftWords, ...rightWords]);
-  const score = union.size ? Math.round((intersection.length / union.size) * 100) : 0;
+  const reference = (state.machineTranslation || "").trim();
+  const attempt = (el.liveTranscript.value || "").trim();
 
-  const missed = [...leftWords].filter((word) => !rightWords.has(word)).slice(0, 12);
-  const extra = [...rightWords].filter((word) => !leftWords.has(word)).slice(0, 12);
+  if (!reference && !attempt) {
+    el.compareScore.textContent = "相似度 --";
+    el.differenceList.textContent = "等待机器标准译文与口译文本。";
+    el.summaryOutput.textContent = "生成机器译文后可进行评分。";
+    el.liveInterpretingNote.value = "暂无可评分内容。";
+    renderProtectedOutputs();
+    return;
+  }
+
+  if (!reference) {
+    el.compareScore.textContent = "相似度 --";
+    el.differenceList.textContent = "缺少机器标准译文，请先点击“生成机器译文”。";
+    el.summaryOutput.textContent = "标准答案未生成。";
+    el.liveInterpretingNote.value = "请先生成机器标准译文，再进行评分。";
+    renderProtectedOutputs();
+    return;
+  }
+
+  if (!attempt) {
+    el.compareScore.textContent = "相似度 0%";
+    el.differenceList.textContent = "尚未检测到个人口译文本。";
+    el.summaryOutput.textContent = "请开始麦克风录入后再评分。";
+    el.liveInterpretingNote.value = "当前无口译文本。";
+    renderProtectedOutputs();
+    return;
+  }
+
+  const language = state.targetLanguage === "unknown" ? inferLanguageFromText(reference) : state.targetLanguage;
+  const refTokens = uniqueTokens(tokenizeForScore(reference, language));
+  const attTokens = uniqueTokens(tokenizeForScore(attempt, language));
+
+  const jaccard = computeJaccardScore(refTokens, attTokens);
+  const dice = computeDiceScore(reference, attempt);
+  const score = Math.max(0, Math.min(100, Math.round((jaccard * 0.6 + dice * 0.4) * 100)));
+
+  const refSet = new Set(refTokens);
+  const attSet = new Set(attTokens);
+  const missed = refTokens.filter((token) => !attSet.has(token)).slice(0, 15);
+  const extra = attTokens.filter((token) => !refSet.has(token)).slice(0, 15);
 
   el.compareScore.textContent = `相似度 ${score}%`;
   el.differenceList.textContent = [
-    missed.length ? `实时录入可能遗漏: ${missed.join(", ")}` : "实时录入未发现明显遗漏。",
-    extra.length ? `实时录入新增表达: ${extra.join(", ")}` : "实时录入未发现明显新增。",
+    missed.length ? `可能遗漏: ${missed.join(language === "zh" ? "" : ", ")}` : "未发现明显遗漏。",
+    extra.length ? `可能新增: ${extra.join(language === "zh" ? "" : ", ")}` : "未发现明显新增。",
   ].join("\n\n");
+
+  const level = score >= 85
+    ? "优秀：语义覆盖度高，继续保持语气与节奏稳定。"
+    : score >= 65
+      ? "良好：核心信息基本到位，建议减少遗漏并提升术语一致性。"
+      : "需加强：建议先做短句分段口译，再逐步提高完整度。";
+
+  const tips = state.translationTips.length
+    ? `\n\n机器建议:\n${state.translationTips.map((item, index) => `${index + 1}. ${item}`).join("\n")}`
+    : "";
+
+  el.summaryOutput.textContent = level;
+  el.liveInterpretingNote.value = `当前评分: ${score}%\n${level}${tips}`;
+
+  renderProtectedOutputs();
 }
 
-function normalizeText(text) {
-  return text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+function resetOutputForNewMedia() {
+  state.sourceLanguage = "unknown";
+  state.targetLanguage = "unknown";
+  state.sourceRestatement = "";
+  state.machineTranslation = "";
+  state.translationTips = [];
+  state.hasRecordingStarted = false;
+  state.hasRecordingCompleted = false;
+
+  el.audioTranscript.value = "";
+  el.machineTranslation.value = "";
+  el.audioTranscriptMirror.textContent = "暂无内容";
+  el.targetLanguageLabel.textContent = "未生成";
+  el.translationStatus.textContent = "待生成";
+  el.summaryOutput.textContent = "等待评分完成。";
+  el.differenceList.textContent = "等待录音结束后自动对比。";
+  el.compareScore.textContent = "相似度 --";
+  refreshLanguagePanels();
 }
 
 async function callDesktopTranscribe(payload) {
@@ -146,184 +437,259 @@ async function callDesktopTranscribe(payload) {
   return null;
 }
 
-async function callDesktopTranslate(payload) {
-  if (window.desktopBridge?.translateAndSummarize) {
-    return window.desktopBridge.translateAndSummarize(payload);
+async function callDesktopChatCompletion(payload) {
+  if (window.desktopBridge?.chatCompletion) {
+    return window.desktopBridge.chatCompletion(payload);
   }
-  if (window.pywebview?.api?.translate_and_summarize) {
-    return window.pywebview.api.translate_and_summarize(payload);
+  if (window.pywebview?.api?.chat_completion) {
+    return window.pywebview.api.chat_completion(payload);
   }
   return null;
 }
 
-function isLocalDesktopServer() {
-  return ["127.0.0.1", "localhost"].includes(window.location.hostname);
+function parseMaybeJson(content) {
+  if (typeof content === "object" && content !== null) {
+    return content;
+  }
+  if (typeof content !== "string") {
+    return null;
+  }
+  try {
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
 }
 
-async function transcribeUploadedAudio() {
+async function requestChatJson({ apiBase, apiKey, model, messages }) {
+  if (window.desktopBridge?.chatCompletion || window.pywebview?.api?.chat_completion) {
+    const result = await callDesktopChatCompletion({
+      apiBase,
+      apiKey,
+      model,
+      messages,
+      responseFormatJson: true,
+      temperature: 0.2,
+    });
+    const content = result?.choices?.[0]?.message?.content || "{}";
+    return parseMaybeJson(content) || {};
+  }
+
+  const response = await fetch(`${apiBase.replace(/\/$/, "")}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.2,
+      response_format: { type: "json_object" },
+      messages,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`文本模型调用失败：${response.status}`);
+  }
+
+  const result = await response.json();
+  const content = result?.choices?.[0]?.message?.content || "{}";
+  return parseMaybeJson(content) || {};
+}
+
+async function transcribeWithOpenAI(file, { apiBase, apiKey, model }) {
+  const endpoint = `${apiBase.replace(/\/$/, "")}/audio/transcriptions`;
+
+  async function runRequest(responseFormat) {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("model", model);
+    formData.append("response_format", responseFormat);
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`转写失败：${response.status} ${text}`);
+    }
+
+    return responseFormat === "text" ? { text: await response.text() } : response.json();
+  }
+
+  const is4oTranscribe = /gpt-4o(-mini)?-transcribe/i.test(model);
+  if (is4oTranscribe) {
+    return runRequest("json");
+  }
+
+  try {
+    return await runRequest("verbose_json");
+  } catch {
+    return runRequest("json");
+  }
+}
+
+async function transcribeUploadedMedia() {
   if (!state.uploadedFile) {
-    el.uploadStatus.textContent = "请先上传音频";
+    el.uploadStatus.textContent = "请先上传音频或视频";
     return;
   }
 
   const apiKey = el.apiKey.value.trim();
   const apiBase = el.apiBase.value.trim();
-  const model = el.transcriptionModel.value.trim();
+  const modelName = el.modelName.value.trim();
 
-  if (!apiKey || !apiBase || !model) {
+  if (!apiKey || !apiBase || !modelName) {
     el.uploadStatus.textContent = "请先填写 API 配置";
     return;
   }
 
-  el.uploadStatus.textContent = "转写中...";
+  el.uploadStatus.textContent = "转写与重述中...";
 
   try {
-    let result = null;
+    let transcriptResult;
+
     if (window.desktopBridge?.transcribeAudio || window.pywebview?.api?.transcribe_audio) {
       const arrayBuffer = await state.uploadedFile.arrayBuffer();
-      result = await callDesktopTranscribe({
+      transcriptResult = await callDesktopTranscribe({
         apiBase,
         apiKey,
-        model,
+        model: modelName,
         fileName: state.uploadedFile.name,
         mimeType: state.uploadedFile.type,
         bytes: Array.from(new Uint8Array(arrayBuffer)),
       });
-    } else if (isLocalDesktopServer()) {
-      const arrayBuffer = await state.uploadedFile.arrayBuffer();
-      const response = await fetch("/api/transcribe", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          apiBase,
-          apiKey,
-          model,
-          fileName: state.uploadedFile.name,
-          mimeType: state.uploadedFile.type,
-          bytes: Array.from(new Uint8Array(arrayBuffer)),
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`转写失败：${response.status}`);
-      }
-
-      result = await response.json();
     } else {
-      const formData = new FormData();
-      formData.append("file", state.uploadedFile);
-      formData.append("model", model);
-      formData.append("language", "en");
-      formData.append("response_format", "json");
-
-      const response = await fetch(`${apiBase.replace(/\/$/, "")}/audio/transcriptions`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: formData,
+      transcriptResult = await transcribeWithOpenAI(state.uploadedFile, {
+        apiBase,
+        apiKey,
+        model: modelName,
       });
-
-      if (!response.ok) {
-        throw new Error(`转写失败：${response.status}`);
-      }
-
-      result = await response.json();
     }
-    el.audioTranscript.value = result.text || "";
-    state.audioTranscript = el.audioTranscript.value;
-    el.uploadStatus.textContent = "转写完成";
-    setTextMetrics();
+
+    const sourceText = transcriptResult?.text?.trim() || "";
+    if (!sourceText) {
+      throw new Error("未获取到有效转写文本");
+    }
+
+    const rawLanguage = normalizeLanguageCode(transcriptResult?.language);
+    state.sourceLanguage = rawLanguage === "unknown" ? inferLanguageFromText(sourceText) : rawLanguage;
+    state.targetLanguage = getTargetLanguage(state.sourceLanguage);
+
+    const restatement = await requestChatJson({
+      apiBase,
+      apiKey,
+      model: modelName,
+      messages: [
+        {
+          role: "system",
+          content: "You are a professional interpreter assistant. Return strict JSON only.",
+        },
+        {
+          role: "user",
+          content: `Rewrite the following source speech in the SAME language without translating. Keep meaning faithful and expression natural. Return JSON: {"language":"en|zh","restatement":"..."}.\n\nSource text:\n${sourceText}`,
+        },
+      ],
+    });
+
+    state.sourceLanguage = normalizeLanguageCode(restatement.language) !== "unknown"
+      ? normalizeLanguageCode(restatement.language)
+      : state.sourceLanguage;
+    state.targetLanguage = getTargetLanguage(state.sourceLanguage);
+    state.sourceRestatement = (restatement.restatement || sourceText).trim();
+
+    renderProtectedOutputs();
+    refreshLanguagePanels();
     updateComparison();
+
+    el.uploadStatus.textContent = "源语重述已生成";
   } catch (error) {
     el.uploadStatus.textContent = error.message;
   }
 }
 
-async function translateAndSummarize() {
-  const sourceText = [el.audioTranscript.value.trim(), el.liveTranscript.value.trim()].filter(Boolean).join("\n\n---\n\n");
+async function translateSourceRestatement() {
+  const sourceText = (state.sourceRestatement || "").trim();
   const apiKey = el.apiKey.value.trim();
   const apiBase = el.apiBase.value.trim();
-  const model = el.chatModel.value.trim();
+  const modelName = el.modelName.value.trim();
 
   if (!sourceText) {
-    el.translationStatus.textContent = "缺少英文文本";
+    el.translationStatus.textContent = "请先生成源语重述";
     return;
   }
 
-  if (!apiKey || !apiBase || !model) {
+  if (!apiKey || !apiBase || !modelName) {
     el.translationStatus.textContent = "请先填写 API 配置";
     return;
   }
 
-  el.translationStatus.textContent = "生成中...";
-  el.summaryOutput.textContent = "正在整理要点...";
+  if (state.sourceLanguage === "unknown") {
+    state.sourceLanguage = inferLanguageFromText(sourceText);
+    state.targetLanguage = getTargetLanguage(state.sourceLanguage);
+  }
 
-  const prompt = `You are assisting a simultaneous interpreting practice dashboard.\nTranslate the English content into natural Chinese.\nThen provide a concise Chinese summary with 3 bullet points.\nReturn strict JSON with keys translation and summary. summary must be an array of strings.\nEnglish content:\n${sourceText}`;
+  if (state.targetLanguage === "unknown") {
+    el.translationStatus.textContent = "未识别到有效中英文源语";
+    return;
+  }
+
+  el.translationStatus.textContent = "翻译中...";
+
+  const translationDirection = state.sourceLanguage === "en" ? "English to Chinese" : "Chinese to English";
+  const targetLanguageName = state.targetLanguage === "zh" ? "Chinese" : "English";
 
   try {
-    let result = null;
-    if (window.desktopBridge?.translateAndSummarize || window.pywebview?.api?.translate_and_summarize) {
-      result = await callDesktopTranslate({
-        apiBase,
-        apiKey,
-        model,
-        sourceText,
-      });
-    } else if (isLocalDesktopServer()) {
-      const response = await fetch("/api/translate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+    const parsed = await requestChatJson({
+      apiBase,
+      apiKey,
+      model: modelName,
+      messages: [
+        {
+          role: "system",
+          content: "You are a professional interpreter evaluator. Return strict JSON only.",
         },
-        body: JSON.stringify({
-          apiBase,
-          apiKey,
-          model,
-          sourceText,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`翻译失败：${response.status}`);
-      }
-
-      result = await response.json();
-    } else {
-      const response = await fetch(`${apiBase.replace(/\/$/, "")}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
+        {
+          role: "user",
+          content: `Task: ${translationDirection}. Translate the source text into natural ${targetLanguageName}. Return JSON with keys:\n1) translation: string\n2) tips: array of 3 short coaching tips for student interpreter in Chinese.\n\nSource text:\n${sourceText}`,
         },
-        body: JSON.stringify({
-          model,
-          temperature: 0.2,
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: "Return concise and accurate JSON only." },
-            { role: "user", content: prompt },
-          ],
-        }),
-      });
+      ],
+    });
 
-      if (!response.ok) {
-        throw new Error(`翻译失败：${response.status}`);
-      }
+    state.machineTranslation = (parsed.translation || "").trim();
+    state.translationTips = Array.isArray(parsed.tips) ? parsed.tips.map((item) => String(item)).slice(0, 3) : [];
 
-      result = await response.json();
+    if (!state.machineTranslation) {
+      throw new Error("机器译文为空，请重试");
     }
-    const content = result.choices?.[0]?.message?.content || "{}";
-    const parsed = JSON.parse(content);
-    el.translatedChinese.value = parsed.translation || "";
-    el.summaryOutput.textContent = Array.isArray(parsed.summary) ? parsed.summary.map((item, index) => `${index + 1}. ${item}`).join("\n") : "未返回摘要。";
-    el.translationStatus.textContent = "已完成";
+
+    el.translationStatus.textContent = shouldHideOutputs() ? "已生成（防作弊模式暂不显示）" : "已生成";
+    renderProtectedOutputs();
+    refreshLanguagePanels();
+    updateComparison();
   } catch (error) {
     el.translationStatus.textContent = error.message;
-    el.summaryOutput.textContent = "生成失败，请检查模型配置或网络连接。";
   }
+}
+
+function resolveMicRecognitionLang() {
+  const selected = el.micInputLanguage.value;
+  if (selected === "zh") {
+    return "zh-CN";
+  }
+  if (selected === "en") {
+    return "en-US";
+  }
+  if (state.targetLanguage === "zh") {
+    return "zh-CN";
+  }
+  return "en-US";
 }
 
 function setupRecognition() {
@@ -335,20 +701,27 @@ function setupRecognition() {
   }
 
   const recognition = new SpeechRecognition();
-  recognition.lang = "en-US";
   recognition.continuous = true;
   recognition.interimResults = true;
 
   recognition.onstart = () => {
     state.isRecognizing = true;
+    state.hasRecordingStarted = true;
     el.micStatus.textContent = "麦克风录入中";
     el.micStatus.classList.remove("muted");
     startTimer();
+    renderProtectedOutputs();
+    updateComparison();
   };
 
   recognition.onend = () => {
     state.isRecognizing = false;
+    if (state.hasRecordingStarted) {
+      state.hasRecordingCompleted = true;
+    }
     stopTimer();
+    renderProtectedOutputs();
+    updateComparison();
     if (el.micStatus.textContent === "麦克风录入中") {
       el.micStatus.textContent = "麦克风已停止";
       el.micStatus.classList.add("muted");
@@ -357,8 +730,11 @@ function setupRecognition() {
 
   recognition.onerror = (event) => {
     state.isRecognizing = false;
+    stopTimer();
     el.micStatus.textContent = `识别异常: ${event.error}`;
     el.micStatus.classList.add("muted");
+    renderProtectedOutputs();
+    updateComparison();
   };
 
   recognition.onresult = (event) => {
@@ -368,9 +744,9 @@ function setupRecognition() {
     for (let i = event.resultIndex; i < event.results.length; i += 1) {
       const transcript = event.results[i][0].transcript;
       if (event.results[i].isFinal) {
-        finalTranscript += transcript + " ";
+        finalTranscript += `${transcript} `;
       } else {
-        interimTranscript += transcript + " ";
+        interimTranscript += `${transcript} `;
       }
     }
 
@@ -378,9 +754,13 @@ function setupRecognition() {
     if (finalTranscript) {
       el.liveTranscript.dataset.finalText = `${base}${finalTranscript}`;
     }
+
     el.liveTranscript.value = `${el.liveTranscript.dataset.finalText || ""}${interimTranscript}`.trim();
     state.liveTranscript = el.liveTranscript.value;
-    setTextMetrics();
+    state.liveDetectedLanguage = inferLanguageFromText(state.liveTranscript);
+
+    refreshLanguagePanels();
+    renderProtectedOutputs();
     updateComparison();
   };
 
@@ -393,8 +773,23 @@ function handleFileSelect(file) {
   }
 
   state.uploadedFile = file;
+  resetOutputForNewMedia();
+
   const objectUrl = URL.createObjectURL(file);
-  el.audioPlayer.src = objectUrl;
+  const isVideo = file.type.startsWith("video/");
+
+  if (isVideo) {
+    el.videoPlayer.hidden = false;
+    el.videoPlayer.src = objectUrl;
+    el.audioPlayer.hidden = true;
+    el.audioPlayer.src = "";
+  } else {
+    el.audioPlayer.hidden = false;
+    el.audioPlayer.src = objectUrl;
+    el.videoPlayer.hidden = true;
+    el.videoPlayer.src = "";
+  }
+
   el.uploadStatus.textContent = `${file.name} 已就绪`;
 }
 
@@ -423,17 +818,35 @@ function setupDropzone() {
 }
 
 el.saveConfigBtn.addEventListener("click", saveConfig);
-el.audioFileInput.addEventListener("change", (event) => handleFileSelect(event.target.files?.[0]));
-el.transcribeAudioBtn.addEventListener("click", transcribeUploadedAudio);
-el.translateAudioBtn.addEventListener("click", translateAndSummarize);
+el.providerPreset.addEventListener("change", () => {
+  applyProviderPreset(el.providerPreset.value);
+  el.configStatus.textContent = "已切换供应商预设（可手动调整）";
+});
+
+el.apiBase.addEventListener("input", () => {
+  const matched = Object.entries(providerPresets).find(([, preset]) => preset.apiBase && preset.apiBase === el.apiBase.value.trim());
+  if (!matched) {
+    el.providerPreset.value = "custom";
+    refreshProviderModelOptions("custom");
+  }
+});
+
+el.mediaFileInput.addEventListener("change", (event) => handleFileSelect(event.target.files?.[0]));
+el.transcribeAudioBtn.addEventListener("click", transcribeUploadedMedia);
+el.translateAudioBtn.addEventListener("click", translateSourceRestatement);
 el.runCompareBtn.addEventListener("click", updateComparison);
 
 el.startMicBtn.addEventListener("click", () => {
   if (!state.recognition || state.isRecognizing) {
     return;
   }
+
   state.recordingSeconds = 0;
   el.recordingTimer.textContent = "00:00";
+  state.liveDetectedLanguage = "unknown";
+  state.hasRecordingStarted = true;
+
+  state.recognition.lang = resolveMicRecognitionLang();
   try {
     state.recognition.start();
   } catch (error) {
@@ -444,35 +857,46 @@ el.startMicBtn.addEventListener("click", () => {
 
 el.stopMicBtn.addEventListener("click", () => {
   state.recognition?.stop();
+  state.isRecognizing = false;
+  if (state.hasRecordingStarted) {
+    state.hasRecordingCompleted = true;
+  }
   stopTimer();
   el.micStatus.textContent = "麦克风已停止";
   el.micStatus.classList.add("muted");
+  renderProtectedOutputs();
+  updateComparison();
 });
 
 el.clearMicBtn.addEventListener("click", () => {
   el.liveTranscript.value = "";
   el.liveTranscript.dataset.finalText = "";
   state.liveTranscript = "";
+  state.liveDetectedLanguage = "unknown";
   state.recordingSeconds = 0;
   el.recordingTimer.textContent = "00:00";
-  setTextMetrics();
-  updateComparison();
-});
-
-el.audioTranscript.addEventListener("input", () => {
-  state.audioTranscript = el.audioTranscript.value;
-  setTextMetrics();
+  refreshLanguagePanels();
+  renderProtectedOutputs();
   updateComparison();
 });
 
 el.liveTranscript.addEventListener("input", () => {
   state.liveTranscript = el.liveTranscript.value;
-  setTextMetrics();
+  state.liveDetectedLanguage = inferLanguageFromText(state.liveTranscript);
+  refreshLanguagePanels();
+  renderProtectedOutputs();
+  updateComparison();
+});
+
+el.antiCheatMode.addEventListener("change", () => {
+  renderProtectedOutputs();
   updateComparison();
 });
 
 loadConfig();
+applyProviderPreset(el.providerPreset.value, { keepModel: true });
 setupRecognition();
 setupDropzone();
-setTextMetrics();
+refreshLanguagePanels();
+renderProtectedOutputs();
 updateComparison();

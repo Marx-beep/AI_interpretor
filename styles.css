@@ -40,6 +40,7 @@ body::before {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -127,6 +128,7 @@ label {
 }
 
 input,
+select,
 textarea {
   width: 100%;
   border: 1px solid rgba(29, 42, 51, 0.1);
@@ -186,6 +188,19 @@ button:disabled {
 .status-text {
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.cheat-guard-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.cheat-guard-toggle input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
 }
 
 .workspace {
@@ -257,6 +272,28 @@ button:disabled {
   gap: 14px;
 }
 
+.language-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.language-grid .mini-card {
+  padding: 12px;
+}
+
+.language-grid .mini-card h3 {
+  font-size: 1rem;
+  margin-bottom: 8px;
+}
+
+.language-grid .bullet-block {
+  min-height: auto;
+  padding: 8px 10px;
+  border-radius: 12px;
+  line-height: 1.4;
+  font-size: 0.92rem;
+}
+
 .bullet-block,
 .mirror-box {
   border-radius: 18px;
@@ -309,7 +346,8 @@ button:disabled {
   }
 
   .config-grid,
-  .compare-columns {
+  .compare-columns,
+  .language-grid {
     grid-template-columns: 1fr;
   }
 
