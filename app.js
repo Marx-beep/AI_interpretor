@@ -90,7 +90,6 @@ const el = {
   liveDetectedLanguage: document.getElementById("liveDetectedLanguage"),
   liveInterpretingNote: document.getElementById("liveInterpretingNote"),
 
-  summaryOutput: document.getElementById("summaryOutput"),
   differenceList: document.getElementById("differenceList"),
   compareScore: document.getElementById("compareScore"),
   audioTranscriptMirror: document.getElementById("audioTranscriptMirror"),
@@ -547,7 +546,6 @@ function updateComparison() {
   if (shouldHideOutputs()) {
     el.compareScore.textContent = "等待录音完成";
     el.differenceList.textContent = "防作弊模式开启：标准答案与评分将在你停止录音后自动揭晓。";
-    el.summaryOutput.textContent = "请先完成录音，再查看对比与评分。";
     el.liveInterpretingNote.value = "防作弊模式开启：可先上传并播放媒体，系统会先生成答案但不显示；停止录音后统一展示。";
     renderProtectedOutputs();
     return;
@@ -559,7 +557,6 @@ function updateComparison() {
   if (!reference && !attempt) {
     el.compareScore.textContent = "相似度 --";
     el.differenceList.textContent = "等待机器标准译文与口译文本。";
-    el.summaryOutput.textContent = "生成机器译文后可进行评分。";
     el.liveInterpretingNote.value = "暂无可评分内容。";
     renderProtectedOutputs();
     return;
@@ -568,7 +565,6 @@ function updateComparison() {
   if (!reference) {
     el.compareScore.textContent = "相似度 --";
     el.differenceList.textContent = "缺少机器标准译文，请先点击“生成机器译文”。";
-    el.summaryOutput.textContent = "标准答案未生成。";
     el.liveInterpretingNote.value = "请先生成机器标准译文，再进行评分。";
     renderProtectedOutputs();
     return;
@@ -577,7 +573,6 @@ function updateComparison() {
   if (!attempt) {
     el.compareScore.textContent = "相似度 0%";
     el.differenceList.textContent = "尚未检测到个人口译文本。";
-    el.summaryOutput.textContent = "请开始麦克风录入后再评分。";
     el.liveInterpretingNote.value = "当前无口译文本。";
     renderProtectedOutputs();
     return;
@@ -612,7 +607,6 @@ function updateComparison() {
     ? `\n\n机器建议:\n${state.translationTips.map((item, index) => `${index + 1}. ${item}`).join("\n")}`
     : "";
 
-  el.summaryOutput.textContent = level;
   el.liveInterpretingNote.value = `当前评分: ${score}%\n${level}${tips}`;
 
   renderProtectedOutputs();
@@ -632,7 +626,7 @@ function resetOutputForNewMedia() {
   el.audioTranscriptMirror.textContent = "暂无内容";
   el.targetLanguageLabel.textContent = "未生成";
   el.translationStatus.textContent = "待生成";
-  el.summaryOutput.textContent = "等待评分完成。";
+  el.liveInterpretingNote.value = "等待评分完成。";
   el.differenceList.textContent = "等待录音结束后自动对比。";
   el.compareScore.textContent = "相似度 --";
   refreshLanguagePanels();
@@ -1061,6 +1055,38 @@ function setupDropzone() {
   });
 }
 
+function setupMirrorSyncScroll() {
+  const leftBox = el.audioTranscriptMirror;
+  const rightBox = el.liveTranscriptMirror;
+  if (!leftBox || !rightBox) {
+    return;
+  }
+
+  let syncingFrom = null;
+
+  const syncScroll = (source, target, sourceKey) => {
+    if (syncingFrom && syncingFrom !== sourceKey) {
+      return;
+    }
+
+    const sourceScrollable = source.scrollHeight - source.clientHeight;
+    const targetScrollable = target.scrollHeight - target.clientHeight;
+    if (sourceScrollable <= 0 || targetScrollable <= 0) {
+      return;
+    }
+
+    syncingFrom = sourceKey;
+    const ratio = source.scrollTop / sourceScrollable;
+    target.scrollTop = ratio * targetScrollable;
+    window.requestAnimationFrame(() => {
+      syncingFrom = null;
+    });
+  };
+
+  leftBox.addEventListener("scroll", () => syncScroll(leftBox, rightBox, "left"));
+  rightBox.addEventListener("scroll", () => syncScroll(rightBox, leftBox, "right"));
+}
+
 el.saveConfigBtn.addEventListener("click", saveConfig);
 el.providerPreset.addEventListener("change", () => {
   applyProviderPreset(el.providerPreset.value);
@@ -1152,6 +1178,7 @@ applyProviderPreset(el.providerPreset.value, { keepModel: true });
 loadApiKeyFromLocalFile();
 setupRecognition();
 setupDropzone();
+setupMirrorSyncScroll();
 setMicButtonRecordingState(false);
 refreshLanguagePanels();
 renderProtectedOutputs();

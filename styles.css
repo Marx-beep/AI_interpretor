@@ -242,6 +242,7 @@ button:disabled {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18px;
+  align-items: start;
 }
 
 .panel {
@@ -249,7 +250,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  min-height: 760px;
+  min-height: auto;
 }
 
 .badge {
@@ -341,7 +342,7 @@ button:disabled {
 }
 
 .fill-card {
-  flex: 1;
+  flex: 0 0 auto;
 }
 
 .compare-columns {
@@ -354,6 +355,11 @@ button:disabled {
 .compare-columns h4 {
   font-size: 0.98rem;
   margin-bottom: 10px;
+}
+
+.compare-columns .mirror-box {
+  max-height: 320px;
+  overflow-y: auto;
 }
 
 .hint {
