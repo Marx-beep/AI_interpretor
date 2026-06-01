@@ -77,7 +77,6 @@ const el = {
   translationStatus: document.getElementById("translationStatus"),
 
   startMicBtn: document.getElementById("startMicBtn"),
-  stopMicBtn: document.getElementById("stopMicBtn"),
   clearMicBtn: document.getElementById("clearMicBtn"),
   micInputLanguage: document.getElementById("micInputLanguage"),
   micStatus: document.getElementById("micStatus"),
@@ -94,6 +93,14 @@ const el = {
   liveTranscriptMirror: document.getElementById("liveTranscriptMirror"),
   runCompareBtn: document.getElementById("runCompareBtn"),
 };
+
+function setMicButtonRecordingState(isRecording) {
+  if (!el.startMicBtn) {
+    return;
+  }
+  el.startMicBtn.classList.toggle("is-recording", isRecording);
+  el.startMicBtn.textContent = isRecording ? "录制中 · 点击停止" : "开始录入";
+}
 
 function refreshProviderModelOptions(providerKey) {
   const preset = providerPresets[providerKey] || providerPresets.custom;
@@ -742,6 +749,7 @@ function setupRecognition() {
     state.hasRecordingStarted = true;
     el.micStatus.textContent = "麦克风录入中";
     el.micStatus.classList.remove("muted");
+    setMicButtonRecordingState(true);
     startTimer();
     renderProtectedOutputs();
     updateComparison();
@@ -753,6 +761,7 @@ function setupRecognition() {
       state.hasRecordingCompleted = true;
     }
     stopTimer();
+    setMicButtonRecordingState(false);
     renderProtectedOutputs();
     updateComparison();
     if (el.micStatus.textContent === "麦克风录入中") {
@@ -764,8 +773,13 @@ function setupRecognition() {
   recognition.onerror = (event) => {
     state.isRecognizing = false;
     stopTimer();
-    el.micStatus.textContent = `识别异常: ${event.error}`;
+    if (event.error === "network") {
+      el.micStatus.textContent = "识别异常: network（请检查网络或切换浏览器）";
+    } else {
+      el.micStatus.textContent = `识别异常: ${event.error}`;
+    }
     el.micStatus.classList.add("muted");
+    setMicButtonRecordingState(false);
     renderProtectedOutputs();
     updateComparison();
   };
@@ -870,7 +884,22 @@ el.translateAudioBtn.addEventListener("click", translateSourceRestatement);
 el.runCompareBtn.addEventListener("click", updateComparison);
 
 el.startMicBtn.addEventListener("click", () => {
-  if (!state.recognition || state.isRecognizing) {
+  if (!state.recognition) {
+    return;
+  }
+
+  if (state.isRecognizing) {
+    state.recognition.stop();
+    state.isRecognizing = false;
+    if (state.hasRecordingStarted) {
+      state.hasRecordingCompleted = true;
+    }
+    stopTimer();
+    setMicButtonRecordingState(false);
+    el.micStatus.textContent = "麦克风已停止";
+    el.micStatus.classList.add("muted");
+    renderProtectedOutputs();
+    updateComparison();
     return;
   }
 
@@ -885,20 +914,8 @@ el.startMicBtn.addEventListener("click", () => {
   } catch (error) {
     el.micStatus.textContent = `启动失败: ${error.message}`;
     el.micStatus.classList.add("muted");
+    setMicButtonRecordingState(false);
   }
-});
-
-el.stopMicBtn.addEventListener("click", () => {
-  state.recognition?.stop();
-  state.isRecognizing = false;
-  if (state.hasRecordingStarted) {
-    state.hasRecordingCompleted = true;
-  }
-  stopTimer();
-  el.micStatus.textContent = "麦克风已停止";
-  el.micStatus.classList.add("muted");
-  renderProtectedOutputs();
-  updateComparison();
 });
 
 el.clearMicBtn.addEventListener("click", () => {
@@ -908,6 +925,7 @@ el.clearMicBtn.addEventListener("click", () => {
   state.liveDetectedLanguage = "unknown";
   state.recordingSeconds = 0;
   el.recordingTimer.textContent = "00:00";
+  setMicButtonRecordingState(false);
   refreshLanguagePanels();
   renderProtectedOutputs();
   updateComparison();
@@ -931,6 +949,7 @@ applyProviderPreset(el.providerPreset.value, { keepModel: true });
 loadApiKeyFromLocalFile();
 setupRecognition();
 setupDropzone();
+setMicButtonRecordingState(false);
 refreshLanguagePanels();
 renderProtectedOutputs();
 updateComparison();
