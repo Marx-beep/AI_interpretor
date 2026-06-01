@@ -193,13 +193,9 @@ async function convertRecordingBlobToWav(blob) {
 }
 
 async function transcribeMicBlob(blob) {
-  const apiKey = el.apiKey.value.trim();
-  const apiBase = el.apiBase.value.trim();
-  const modelName = el.modelName.value.trim();
-
-  if (!apiKey || !apiBase || !modelName) {
-    throw new Error("请先填写 API 配置后再使用麦克风");
-  }
+  const apiKey = el.apiKey.value.trim() || "local";
+  const apiBase = el.apiBase.value.trim() || "http://127.0.0.1";
+  const modelName = el.modelName.value.trim() || "local-fallback";
 
   const wavBlob = await convertRecordingBlobToWav(blob);
   const arrayBuffer = await wavBlob.arrayBuffer();
@@ -692,7 +688,12 @@ async function requestChatJson({ apiBase, apiKey, model, messages }) {
       temperature: 0.2,
     });
     const content = result?.choices?.[0]?.message?.content || "{}";
-    return parseMaybeJson(content) || {};
+    const parsed = parseMaybeJson(content) || {};
+    if (result?.localFallback || result?.fallbackReason) {
+      parsed.local_fallback = true;
+      parsed.fallback_reason = String(result?.fallbackReason || parsed.fallback_reason || "网络异常");
+    }
+    return parsed;
   }
 
   const response = await fetch(`${apiBase.replace(/\/$/, "")}/chat/completions`, {
@@ -756,12 +757,13 @@ async function transcribeWithOpenAI(file, { apiBase, apiKey, model }) {
 }
 
 async function transcribeUploadedMedia() {
-  const apiKey = el.apiKey.value.trim();
-  const apiBase = el.apiBase.value.trim();
-  const modelName = el.modelName.value.trim();
+  const apiKey = el.apiKey.value.trim() || "local";
+  const apiBase = el.apiBase.value.trim() || "http://127.0.0.1";
+  const modelName = el.modelName.value.trim() || "local-fallback";
   const manualSourceText = el.manualSourceText.value.trim();
+  const hasDesktopFallback = Boolean(window.desktopBridge?.chatCompletion || window.pywebview?.api?.chat_completion);
 
-  if (!apiKey || !apiBase || !modelName) {
+  if ((!el.apiBase.value.trim() || !el.modelName.value.trim()) && !hasDesktopFallback) {
     el.uploadStatus.textContent = "请先填写 API 配置";
     return;
   }
@@ -835,7 +837,9 @@ async function transcribeUploadedMedia() {
     refreshLanguagePanels();
     updateComparison();
 
-    el.uploadStatus.textContent = "源语重述已生成";
+    el.uploadStatus.textContent = restatement.local_fallback
+      ? `源语重述已生成（本地模式：${restatement.fallback_reason || "网络异常"}）`
+      : "源语重述已生成";
   } catch (error) {
     if (isDeepSeekMode() && state.uploadedFile) {
       el.uploadStatus.textContent = `${error.message}（DeepSeek 不支持时已尝试本地 ASR 兜底）`;
@@ -847,16 +851,17 @@ async function transcribeUploadedMedia() {
 
 async function translateSourceRestatement() {
   const sourceText = (state.sourceRestatement || "").trim();
-  const apiKey = el.apiKey.value.trim();
-  const apiBase = el.apiBase.value.trim();
-  const modelName = el.modelName.value.trim();
+  const apiKey = el.apiKey.value.trim() || "local";
+  const apiBase = el.apiBase.value.trim() || "http://127.0.0.1";
+  const modelName = el.modelName.value.trim() || "local-fallback";
+  const hasDesktopFallback = Boolean(window.desktopBridge?.chatCompletion || window.pywebview?.api?.chat_completion);
 
   if (!sourceText) {
     el.translationStatus.textContent = "请先生成源语重述";
     return;
   }
 
-  if (!apiKey || !apiBase || !modelName) {
+  if ((!el.apiBase.value.trim() || !el.modelName.value.trim()) && !hasDesktopFallback) {
     el.translationStatus.textContent = "请先填写 API 配置";
     return;
   }
@@ -900,7 +905,11 @@ async function translateSourceRestatement() {
       throw new Error("机器译文为空，请重试");
     }
 
-    el.translationStatus.textContent = shouldHideOutputs() ? "已生成（防作弊模式暂不显示）" : "已生成";
+    if (parsed.local_fallback) {
+      el.translationStatus.textContent = `已切换本地模式（${parsed.fallback_reason || "网络异常"}）`;
+    } else {
+      el.translationStatus.textContent = shouldHideOutputs() ? "已生成（防作弊模式暂不显示）" : "已生成";
+    }
     renderProtectedOutputs();
     refreshLanguagePanels();
     updateComparison();
