@@ -126,6 +126,73 @@ async function ensureMicStream() {
   return stream;
 }
 
+function encodePcm16Wav(audioBuffer) {
+  const numChannels = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const length = audioBuffer.length;
+  const bytesPerSample = 2;
+  const blockAlign = numChannels * bytesPerSample;
+  const dataSize = length * blockAlign;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  function writeString(offset, text) {
+    for (let i = 0; i < text.length; i += 1) {
+      view.setUint8(offset + i, text.charCodeAt(i));
+    }
+  }
+
+  writeString(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, "WAVE");
+  writeString(12, "fmt ");
+  view.setUint32(16, 16, true); // PCM chunk size
+  view.setUint16(20, 1, true); // PCM format
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true); // 16-bit PCM
+  writeString(36, "data");
+  view.setUint32(40, dataSize, true);
+
+  const channels = [];
+  for (let channel = 0; channel < numChannels; channel += 1) {
+    channels.push(audioBuffer.getChannelData(channel));
+  }
+
+  let offset = 44;
+  for (let i = 0; i < length; i += 1) {
+    for (let channel = 0; channel < numChannels; channel += 1) {
+      const sample = Math.max(-1, Math.min(1, channels[channel][i]));
+      const int16 = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+      view.setInt16(offset, int16, true);
+      offset += 2;
+    }
+  }
+
+  return new Blob([buffer], { type: "audio/wav" });
+}
+
+async function convertRecordingBlobToWav(blob) {
+  if (!blob || blob.size === 0) {
+    throw new Error("录音数据为空");
+  }
+
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) {
+    throw new Error("当前环境不支持音频解码，请改用手动文本输入");
+  }
+  const audioContext = new AudioContextCtor();
+  try {
+    const arrayBuffer = await blob.arrayBuffer();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+    return encodePcm16Wav(audioBuffer);
+  } finally {
+    await audioContext.close();
+  }
+}
+
 async function transcribeMicBlob(blob) {
   const apiKey = el.apiKey.value.trim();
   const apiBase = el.apiBase.value.trim();
@@ -135,13 +202,14 @@ async function transcribeMicBlob(blob) {
     throw new Error("请先填写 API 配置后再使用麦克风");
   }
 
-  const arrayBuffer = await blob.arrayBuffer();
+  const wavBlob = await convertRecordingBlobToWav(blob);
+  const arrayBuffer = await wavBlob.arrayBuffer();
   const result = await callDesktopTranscribe({
     apiBase,
     apiKey,
     model: modelName,
-    fileName: "mic-input.webm",
-    mimeType: blob.type || "audio/webm",
+    fileName: "mic-input.wav",
+    mimeType: "audio/wav",
     bytes: Array.from(new Uint8Array(arrayBuffer)),
   });
 
@@ -197,6 +265,9 @@ async function startLocalMicRecording() {
     }
 
     try {
+      if (state.micChunks.length === 0) {
+        throw new Error("未采集到录音数据，请检查麦克风权限");
+      }
       const blob = new Blob(state.micChunks, { type: preferredType });
       const parsed = await transcribeMicBlob(blob);
       const base = el.liveTranscript.dataset.finalText || "";
