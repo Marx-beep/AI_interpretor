@@ -15,6 +15,10 @@ const state = {
   timerId: null,
   recordingSeconds: 0,
   translationTips: [],
+  micStream: null,
+  mediaRecorder: null,
+  micChunks: [],
+  micMode: "speech",
 };
 
 const providerPresets = {
@@ -100,6 +104,128 @@ function setMicButtonRecordingState(isRecording) {
   }
   el.startMicBtn.classList.toggle("is-recording", isRecording);
   el.startMicBtn.textContent = isRecording ? "录制中 · 点击停止" : "开始录入";
+}
+
+function setMicMode(mode) {
+  state.micMode = mode;
+  if (mode === "local") {
+    el.micStatus.textContent = "本地录音模式（语音识别网络异常时兜底）";
+    el.micStatus.classList.add("muted");
+  }
+}
+
+async function ensureMicStream() {
+  if (state.micStream) {
+    return state.micStream;
+  }
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error("当前环境不支持麦克风权限接口");
+  }
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  state.micStream = stream;
+  return stream;
+}
+
+async function transcribeMicBlob(blob) {
+  const apiKey = el.apiKey.value.trim();
+  const apiBase = el.apiBase.value.trim();
+  const modelName = el.modelName.value.trim();
+
+  if (!apiKey || !apiBase || !modelName) {
+    throw new Error("请先填写 API 配置后再使用麦克风");
+  }
+
+  const arrayBuffer = await blob.arrayBuffer();
+  const result = await callDesktopTranscribe({
+    apiBase,
+    apiKey,
+    model: modelName,
+    fileName: "mic-input.webm",
+    mimeType: blob.type || "audio/webm",
+    bytes: Array.from(new Uint8Array(arrayBuffer)),
+  });
+
+  const text = (result?.text || "").trim();
+  if (!text) {
+    throw new Error("麦克风录音转写为空");
+  }
+  const normalizedLanguage = normalizeLanguageCode(result?.language);
+  return {
+    text,
+    language: normalizedLanguage === "unknown" ? inferLanguageFromText(text) : normalizedLanguage,
+  };
+}
+
+async function startLocalMicRecording() {
+  const stream = await ensureMicStream();
+  const preferredType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+    ? "audio/webm;codecs=opus"
+    : "audio/webm";
+  const recorder = new MediaRecorder(stream, { mimeType: preferredType });
+  state.mediaRecorder = recorder;
+  state.micChunks = [];
+
+  recorder.onstart = () => {
+    state.isRecognizing = true;
+    state.hasRecordingStarted = true;
+    el.micStatus.textContent = "麦克风录音中（本地转写）";
+    el.micStatus.classList.remove("muted");
+    setMicButtonRecordingState(true);
+    startTimer();
+  };
+
+  recorder.ondataavailable = (event) => {
+    if (event.data && event.data.size > 0) {
+      state.micChunks.push(event.data);
+    }
+  };
+
+  recorder.onerror = (event) => {
+    state.isRecognizing = false;
+    stopTimer();
+    setMicButtonRecordingState(false);
+    el.micStatus.textContent = `录音异常: ${event.error?.name || "unknown"}`;
+    el.micStatus.classList.add("muted");
+  };
+
+  recorder.onstop = async () => {
+    state.isRecognizing = false;
+    stopTimer();
+    setMicButtonRecordingState(false);
+    if (state.hasRecordingStarted) {
+      state.hasRecordingCompleted = true;
+    }
+
+    try {
+      const blob = new Blob(state.micChunks, { type: preferredType });
+      const parsed = await transcribeMicBlob(blob);
+      const base = el.liveTranscript.dataset.finalText || "";
+      el.liveTranscript.dataset.finalText = `${base}${parsed.text} `;
+      el.liveTranscript.value = el.liveTranscript.dataset.finalText.trim();
+      state.liveTranscript = el.liveTranscript.value;
+      state.liveDetectedLanguage = parsed.language === "unknown" ? inferLanguageFromText(parsed.text) : parsed.language;
+      el.micStatus.textContent = "麦克风已停止（本地转写完成）";
+      el.micStatus.classList.add("muted");
+      refreshLanguagePanels();
+      renderProtectedOutputs();
+      updateComparison();
+    } catch (error) {
+      el.micStatus.textContent = `本地转写失败: ${error.message}`;
+      el.micStatus.classList.add("muted");
+    }
+  };
+
+  recorder.start();
+}
+
+function stopCurrentMicCapture() {
+  if (state.micMode === "local") {
+    if (state.mediaRecorder && state.mediaRecorder.state !== "inactive") {
+      state.mediaRecorder.stop();
+    }
+    return;
+  }
+  state.recognition?.stop();
 }
 
 function refreshProviderModelOptions(providerKey) {
@@ -735,8 +861,7 @@ function resolveMicRecognitionLang() {
 function setupRecognition() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
-    el.micStatus.textContent = "当前浏览器不支持语音识别";
-    el.startMicBtn.disabled = true;
+    setMicMode("local");
     return;
   }
 
@@ -774,7 +899,8 @@ function setupRecognition() {
     state.isRecognizing = false;
     stopTimer();
     if (event.error === "network") {
-      el.micStatus.textContent = "识别异常: network（请检查网络或切换浏览器）";
+      el.micStatus.textContent = "识别异常: network，已切换到本地录音模式";
+      setMicMode("local");
     } else {
       el.micStatus.textContent = `识别异常: ${event.error}`;
     }
@@ -884,12 +1010,8 @@ el.translateAudioBtn.addEventListener("click", translateSourceRestatement);
 el.runCompareBtn.addEventListener("click", updateComparison);
 
 el.startMicBtn.addEventListener("click", () => {
-  if (!state.recognition) {
-    return;
-  }
-
   if (state.isRecognizing) {
-    state.recognition.stop();
+    stopCurrentMicCapture();
     state.isRecognizing = false;
     if (state.hasRecordingStarted) {
       state.hasRecordingCompleted = true;
@@ -908,6 +1030,15 @@ el.startMicBtn.addEventListener("click", () => {
   state.liveDetectedLanguage = "unknown";
   state.hasRecordingStarted = true;
 
+  if (state.micMode === "local" || !state.recognition) {
+    startLocalMicRecording().catch((error) => {
+      el.micStatus.textContent = `启动失败: ${error.message}`;
+      el.micStatus.classList.add("muted");
+      setMicButtonRecordingState(false);
+    });
+    return;
+  }
+
   state.recognition.lang = resolveMicRecognitionLang();
   try {
     state.recognition.start();
@@ -919,6 +1050,7 @@ el.startMicBtn.addEventListener("click", () => {
 });
 
 el.clearMicBtn.addEventListener("click", () => {
+  stopCurrentMicCapture();
   el.liveTranscript.value = "";
   el.liveTranscript.dataset.finalText = "";
   state.liveTranscript = "";
