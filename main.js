@@ -47,20 +47,28 @@ app.on("window-all-closed", () => {
 function runPythonLocalAsr(inputPath) {
   return new Promise((resolve, reject) => {
     const scriptPath = path.join(__dirname, "local_asr.py");
-    const child = spawn("python", [scriptPath, inputPath], {
+    const child = spawn("python", ["-X", "utf8", scriptPath, inputPath], {
       windowsHide: true,
       cwd: __dirname,
+      env: {
+        ...process.env,
+        PYTHONUTF8: "1",
+        PYTHONIOENCODING: "utf-8",
+      },
     });
 
     let stdout = "";
     let stderr = "";
 
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+
     child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
+      stdout += chunk;
     });
 
     child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
+      stderr += chunk;
     });
 
     child.on("error", (err) => reject(err));
