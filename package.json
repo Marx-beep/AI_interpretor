@@ -21,6 +21,7 @@
       "app.js",
       "main.js",
       "preload.js",
+      "local_asr.py",
       "package.json"
     ],
     "win": {

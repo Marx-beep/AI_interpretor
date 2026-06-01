@@ -27,8 +27,8 @@ const providerPresets = {
   deepseek: {
     name: "DeepSeek",
     apiBase: "https://api.deepseek.com",
-    models: ["deepseek-chat", "deepseek-reasoner"],
-    hint: "DeepSeek 当前以文本模型为主；音视频转写能力依赖其兼容接口实际支持情况。",
+    models: ["deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"],
+    hint: "DeepSeek 走文本能力：音视频可播放，但建议手动粘贴源语文本后再生成重述。",
   },
   dashscope: {
     name: "阿里云百炼",
@@ -67,6 +67,7 @@ const el = {
   transcribeAudioBtn: document.getElementById("transcribeAudioBtn"),
   translateAudioBtn: document.getElementById("translateAudioBtn"),
   antiCheatMode: document.getElementById("antiCheatMode"),
+  manualSourceText: document.getElementById("manualSourceText"),
 
   sourceLanguageLabel: document.getElementById("sourceLanguageLabel"),
   targetLanguageLabel: document.getElementById("targetLanguageLabel"),
@@ -152,6 +153,12 @@ function saveConfig() {
   };
   localStorage.setItem(storageKey, JSON.stringify(payload));
   el.configStatus.textContent = "已保存到浏览器本地";
+}
+
+function isDeepSeekMode() {
+  const apiBase = el.apiBase.value.trim().toLowerCase();
+  const model = el.modelName.value.trim().toLowerCase();
+  return apiBase.includes("api.deepseek.com") || model.includes("deepseek");
 }
 
 function formatTime(totalSeconds) {
@@ -447,6 +454,21 @@ async function callDesktopChatCompletion(payload) {
   return null;
 }
 
+async function loadApiKeyFromLocalFile() {
+  if (!window.desktopBridge?.readLocalApiKey || el.apiKey.value.trim()) {
+    return;
+  }
+  try {
+    const key = await window.desktopBridge.readLocalApiKey();
+    if (key) {
+      el.apiKey.value = key;
+      el.configStatus.textContent = "已从本地 api 文件读取 API Key";
+    }
+  } catch {
+    // ignore local file read failures
+  }
+}
+
 function parseMaybeJson(content) {
   if (typeof content === "object" && content !== null) {
     return content;
@@ -536,49 +558,56 @@ async function transcribeWithOpenAI(file, { apiBase, apiKey, model }) {
 }
 
 async function transcribeUploadedMedia() {
-  if (!state.uploadedFile) {
-    el.uploadStatus.textContent = "请先上传音频或视频";
-    return;
-  }
-
   const apiKey = el.apiKey.value.trim();
   const apiBase = el.apiBase.value.trim();
   const modelName = el.modelName.value.trim();
+  const manualSourceText = el.manualSourceText.value.trim();
 
   if (!apiKey || !apiBase || !modelName) {
     el.uploadStatus.textContent = "请先填写 API 配置";
     return;
   }
 
+  if (!state.uploadedFile && !manualSourceText) {
+    el.uploadStatus.textContent = "请先上传媒体，或在“手动源语文本”里输入内容";
+    return;
+  }
+
   el.uploadStatus.textContent = "转写与重述中...";
 
   try {
-    let transcriptResult;
+    let sourceText = "";
+    let rawLanguage = "unknown";
 
-    if (window.desktopBridge?.transcribeAudio || window.pywebview?.api?.transcribe_audio) {
-      const arrayBuffer = await state.uploadedFile.arrayBuffer();
-      transcriptResult = await callDesktopTranscribe({
-        apiBase,
-        apiKey,
-        model: modelName,
-        fileName: state.uploadedFile.name,
-        mimeType: state.uploadedFile.type,
-        bytes: Array.from(new Uint8Array(arrayBuffer)),
-      });
-    } else {
-      transcriptResult = await transcribeWithOpenAI(state.uploadedFile, {
-        apiBase,
-        apiKey,
-        model: modelName,
-      });
+    if (manualSourceText && !state.uploadedFile) {
+      sourceText = manualSourceText;
+    } else if (state.uploadedFile) {
+      let transcriptResult;
+      if (window.desktopBridge?.transcribeAudio || window.pywebview?.api?.transcribe_audio) {
+        const arrayBuffer = await state.uploadedFile.arrayBuffer();
+        transcriptResult = await callDesktopTranscribe({
+          apiBase,
+          apiKey,
+          model: modelName,
+          fileName: state.uploadedFile.name,
+          mimeType: state.uploadedFile.type,
+          bytes: Array.from(new Uint8Array(arrayBuffer)),
+        });
+      } else {
+        transcriptResult = await transcribeWithOpenAI(state.uploadedFile, {
+          apiBase,
+          apiKey,
+          model: modelName,
+        });
+      }
+      sourceText = transcriptResult?.text?.trim() || "";
+      rawLanguage = normalizeLanguageCode(transcriptResult?.language);
     }
 
-    const sourceText = transcriptResult?.text?.trim() || "";
     if (!sourceText) {
-      throw new Error("未获取到有效转写文本");
+      throw new Error("未获取到有效源语文本。你可以在“手动源语文本”中粘贴内容后重试。");
     }
 
-    const rawLanguage = normalizeLanguageCode(transcriptResult?.language);
     state.sourceLanguage = rawLanguage === "unknown" ? inferLanguageFromText(sourceText) : rawLanguage;
     state.targetLanguage = getTargetLanguage(state.sourceLanguage);
 
@@ -610,7 +639,11 @@ async function transcribeUploadedMedia() {
 
     el.uploadStatus.textContent = "源语重述已生成";
   } catch (error) {
-    el.uploadStatus.textContent = error.message;
+    if (isDeepSeekMode() && state.uploadedFile) {
+      el.uploadStatus.textContent = `${error.message}（DeepSeek 不支持时已尝试本地 ASR 兜底）`;
+    } else {
+      el.uploadStatus.textContent = error.message;
+    }
   }
 }
 
@@ -895,6 +928,7 @@ el.antiCheatMode.addEventListener("change", () => {
 
 loadConfig();
 applyProviderPreset(el.providerPreset.value, { keepModel: true });
+loadApiKeyFromLocalFile();
 setupRecognition();
 setupDropzone();
 refreshLanguagePanels();

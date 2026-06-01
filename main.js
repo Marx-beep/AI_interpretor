@@ -1,5 +1,8 @@
 ﻿const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const path = require("node:path");
+const fs = require("node:fs");
+const os = require("node:os");
+const { spawn } = require("node:child_process");
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -41,6 +44,66 @@ app.on("window-all-closed", () => {
   }
 });
 
+function runPythonLocalAsr(inputPath) {
+  return new Promise((resolve, reject) => {
+    const scriptPath = path.join(__dirname, "local_asr.py");
+    const child = spawn("python", [scriptPath, inputPath], {
+      windowsHide: true,
+      cwd: __dirname,
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on("error", (err) => reject(err));
+
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(stderr.trim() || `local_asr.py exited with code ${code}`));
+        return;
+      }
+      resolve(stdout.trim());
+    });
+  });
+}
+
+async function transcribeWithLocalAsr({ fileName, bytes, mimeType, remoteError }) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-interpret-"));
+  const safeName = fileName || "input-media";
+  const ext = path.extname(safeName) || (mimeType?.includes("video") ? ".mp4" : ".wav");
+  const tempPath = path.join(tempDir, `media${ext}`);
+
+  try {
+    fs.writeFileSync(tempPath, Buffer.from(bytes));
+    const raw = await runPythonLocalAsr(tempPath);
+    const parsed = JSON.parse(raw);
+    if (!parsed?.text) {
+      throw new Error("local ASR returned empty text");
+    }
+
+    return {
+      text: parsed.text,
+      language: parsed.language || "",
+      provider: "local-asr",
+      fallbackReason: String(remoteError?.message || "remote transcription unsupported"),
+    };
+  } finally {
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup failures
+    }
+  }
+}
+
 async function transcribeWithRetry({ apiBase, apiKey, model, fileName, mimeType, bytes }) {
   const endpoint = `${apiBase.replace(/\/$/, "")}/audio/transcriptions`;
   const binary = Buffer.from(bytes);
@@ -68,15 +131,19 @@ async function transcribeWithRetry({ apiBase, apiKey, model, fileName, mimeType,
     return responseFormat === "text" ? { text: await response.text() } : response.json();
   }
 
-  const is4oTranscribe = /gpt-4o(-mini)?-transcribe/i.test(model);
-  if (is4oTranscribe) {
-    return doRequest("json");
-  }
-
   try {
-    return await doRequest("verbose_json");
-  } catch {
-    return doRequest("json");
+    const is4oTranscribe = /gpt-4o(-mini)?-transcribe/i.test(model);
+    if (is4oTranscribe) {
+      return await doRequest("json");
+    }
+
+    try {
+      return await doRequest("verbose_json");
+    } catch {
+      return await doRequest("json");
+    }
+  } catch (remoteError) {
+    return transcribeWithLocalAsr({ fileName, bytes, mimeType, remoteError });
   }
 }
 
@@ -114,4 +181,16 @@ ipcMain.handle("chat-completion", async (_, payload) => {
   }
 
   return response.json();
+});
+
+ipcMain.handle("read-local-api-key", async () => {
+  try {
+    const keyPath = path.join(__dirname, "api");
+    if (!fs.existsSync(keyPath)) {
+      return "";
+    }
+    return fs.readFileSync(keyPath, "utf8").trim();
+  } catch {
+    return "";
+  }
 });

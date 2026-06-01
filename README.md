@@ -10,6 +10,7 @@
 - 个人口译：麦克风实时录入口译文本
 - 自动评分：将个人口译与机器标准译文进行相似度评分
 - 防作弊模式：录音结束前隐藏标准答案与评分
+- 转写兜底：当云端 `/audio/transcriptions` 不可用时，自动切换本地 `faster-whisper` 转写
 
 ## 模型与 API 配置（已更新）
 
@@ -21,6 +22,8 @@
 - 统一模型：转写、源语重述、机器翻译全部使用同一个模型名
 
 > 注意：不同供应商对 `/audio/transcriptions` 兼容程度不同。若转写报错，请切换到支持语音转写的模型或供应商。
+>
+> 已内置本地兜底：DeepSeek 等不支持媒体转写时，会自动尝试本机 Python ASR（首次会下载 `faster-whisper tiny` 模型）。
 
 ## 防作弊流程
 
@@ -45,6 +48,8 @@
 npm install
 npm start
 ```
+
+首次使用本地兜底转写时，需要可用的 Python 环境（已自动调用 `pip install faster-whisper`）。
 
 ## 打包
 
