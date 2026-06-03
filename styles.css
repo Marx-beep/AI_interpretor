@@ -53,14 +53,10 @@ textarea {
 
 .hero {
   display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: clamp(14px, 1.4vw, 22px);
+  grid-template-columns: 1.4fr 1fr;
+  gap: 20px;
   align-items: start;
   margin-bottom: 22px;
-}
-
-.hero > :first-child {
-  grid-column: span 7;
 }
 
 .eyebrow,
@@ -110,7 +106,6 @@ h1 {
 }
 
 .config-card {
-  grid-column: span 5;
   padding: 20px;
 }
 
@@ -144,9 +139,7 @@ textarea {
 }
 
 textarea {
-  min-height: 180px;
-  max-height: 320px;
-  overflow-y: auto;
+  min-height: 220px;
   resize: vertical;
   line-height: 1.7;
 }
@@ -223,14 +216,6 @@ button:disabled {
   gap: 12px;
 }
 
-.panel-head {
-  flex-wrap: wrap;
-}
-
-.panel-head .badge {
-  flex-shrink: 0;
-}
-
 .config-actions {
   margin-top: 14px;
 }
@@ -255,34 +240,16 @@ button:disabled {
 
 .workspace {
   display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: clamp(14px, 1.4vw, 22px);
-  align-items: start;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
 }
 
 .panel {
-  grid-column: span 12;
   padding: 18px;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  min-height: auto;
-}
-
-.panel-audio {
-  grid-column: span 7;
-}
-
-.panel-live {
-  grid-column: span 5;
-}
-
-.panel-compare {
-  grid-column: 1 / -1;
-}
-
-.panel > * {
-  width: 100%;
+  min-height: 760px;
 }
 
 .badge {
@@ -332,7 +299,6 @@ button:disabled {
 
 .compact-card textarea {
   min-height: 160px;
-  max-height: 240px;
 }
 
 .comparison-grid {
@@ -374,13 +340,8 @@ button:disabled {
   white-space: pre-wrap;
 }
 
-#differenceList {
-  max-height: 220px;
-  overflow-y: auto;
-}
-
 .fill-card {
-  flex: 0 0 auto;
+  flex: 1;
 }
 
 .compare-columns {
@@ -390,35 +351,9 @@ button:disabled {
   margin-top: 14px;
 }
 
-.compare-columns > div {
-  min-width: 0;
-}
-
 .compare-columns h4 {
   font-size: 0.98rem;
   margin-bottom: 10px;
-}
-
-.compare-columns .mirror-box {
-  height: clamp(220px, 30vh, 360px);
-  overflow-y: auto;
-}
-
-#manualSourceText {
-  min-height: 136px;
-  max-height: 210px;
-}
-
-#audioTranscript,
-#machineTranslation,
-#liveTranscript {
-  min-height: 210px;
-  max-height: 320px;
-}
-
-#liveInterpretingNote {
-  min-height: 180px;
-  max-height: 260px;
 }
 
 .hint {
@@ -428,34 +363,14 @@ button:disabled {
   font-size: 0.92rem;
 }
 
-@media (max-width: 1420px) {
-  .hero > :first-child,
-  .config-card,
-  .panel-audio,
-  .panel-live {
-    grid-column: span 6;
-  }
-}
-
 @media (max-width: 1180px) {
   .hero,
   .workspace {
-    grid-template-columns: repeat(12, minmax(0, 1fr));
-  }
-
-  .hero > :first-child,
-  .config-card,
-  .panel-audio,
-  .panel-live,
-  .panel-compare {
-    grid-column: span 12;
-  }
-}
-
-@media (max-width: 860px) {
-  .compare-columns,
-  .language-grid {
     grid-template-columns: 1fr;
+  }
+
+  .panel {
+    min-height: auto;
   }
 }
 
@@ -465,7 +380,9 @@ button:disabled {
     padding-top: 14px;
   }
 
-  .config-grid {
+  .config-grid,
+  .compare-columns,
+  .language-grid {
     grid-template-columns: 1fr;
   }
 

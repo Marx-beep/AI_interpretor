@@ -5,6 +5,7 @@ const state = {
   sourceLanguage: "unknown",
   targetLanguage: "unknown",
   sourceRestatement: "",
+  sourceHints: "",
   machineTranslation: "",
   liveTranscript: "",
   liveDetectedLanguage: "unknown",
@@ -70,12 +71,15 @@ const el = {
   uploadStatus: document.getElementById("uploadStatus"),
   transcribeAudioBtn: document.getElementById("transcribeAudioBtn"),
   translateAudioBtn: document.getElementById("translateAudioBtn"),
+  generateHintsMode: document.getElementById("generateHintsMode"),
   antiCheatMode: document.getElementById("antiCheatMode"),
   manualSourceText: document.getElementById("manualSourceText"),
 
   sourceLanguageLabel: document.getElementById("sourceLanguageLabel"),
   targetLanguageLabel: document.getElementById("targetLanguageLabel"),
   audioTranscript: document.getElementById("audioTranscript"),
+  sourceHints: document.getElementById("sourceHints"),
+  sourceHintsStatus: document.getElementById("sourceHintsStatus"),
   machineTranslation: document.getElementById("machineTranslation"),
   audioWordCount: document.getElementById("audioWordCount"),
   translationStatus: document.getElementById("translationStatus"),
@@ -90,6 +94,7 @@ const el = {
   liveDetectedLanguage: document.getElementById("liveDetectedLanguage"),
   liveInterpretingNote: document.getElementById("liveInterpretingNote"),
 
+  summaryOutput: document.getElementById("summaryOutput"),
   differenceList: document.getElementById("differenceList"),
   compareScore: document.getElementById("compareScore"),
   audioTranscriptMirror: document.getElementById("audioTranscriptMirror"),
@@ -193,9 +198,13 @@ async function convertRecordingBlobToWav(blob) {
 }
 
 async function transcribeMicBlob(blob) {
-  const apiKey = el.apiKey.value.trim() || "local";
-  const apiBase = el.apiBase.value.trim() || "http://127.0.0.1";
-  const modelName = el.modelName.value.trim() || "local-fallback";
+  const apiKey = el.apiKey.value.trim();
+  const apiBase = el.apiBase.value.trim();
+  const modelName = el.modelName.value.trim();
+
+  if (!apiKey || !apiBase || !modelName) {
+    throw new Error("请先填写 API 配置后再使用麦克风");
+  }
 
   const wavBlob = await convertRecordingBlobToWav(blob);
   const arrayBuffer = await wavBlob.arrayBuffer();
@@ -524,6 +533,7 @@ function renderProtectedOutputs() {
   const machineText = hide && state.machineTranslation ? "防作弊模式：录音结束后显示机器标准译文。" : state.machineTranslation;
 
   el.audioTranscript.value = sourceText;
+  el.sourceHints.value = state.sourceHints;
   el.machineTranslation.value = machineText;
 
   el.audioTranscriptMirror.textContent = machineText || "暂无内容";
@@ -542,6 +552,7 @@ function updateComparison() {
   if (shouldHideOutputs()) {
     el.compareScore.textContent = "等待录音完成";
     el.differenceList.textContent = "防作弊模式开启：标准答案与评分将在你停止录音后自动揭晓。";
+    el.summaryOutput.textContent = "请先完成录音，再查看对比与评分。";
     el.liveInterpretingNote.value = "防作弊模式开启：可先上传并播放媒体，系统会先生成答案但不显示；停止录音后统一展示。";
     renderProtectedOutputs();
     return;
@@ -553,6 +564,7 @@ function updateComparison() {
   if (!reference && !attempt) {
     el.compareScore.textContent = "相似度 --";
     el.differenceList.textContent = "等待机器标准译文与口译文本。";
+    el.summaryOutput.textContent = "生成机器译文后可进行评分。";
     el.liveInterpretingNote.value = "暂无可评分内容。";
     renderProtectedOutputs();
     return;
@@ -561,6 +573,7 @@ function updateComparison() {
   if (!reference) {
     el.compareScore.textContent = "相似度 --";
     el.differenceList.textContent = "缺少机器标准译文，请先点击“生成机器译文”。";
+    el.summaryOutput.textContent = "标准答案未生成。";
     el.liveInterpretingNote.value = "请先生成机器标准译文，再进行评分。";
     renderProtectedOutputs();
     return;
@@ -569,6 +582,7 @@ function updateComparison() {
   if (!attempt) {
     el.compareScore.textContent = "相似度 0%";
     el.differenceList.textContent = "尚未检测到个人口译文本。";
+    el.summaryOutput.textContent = "请开始麦克风录入后再评分。";
     el.liveInterpretingNote.value = "当前无口译文本。";
     renderProtectedOutputs();
     return;
@@ -603,6 +617,7 @@ function updateComparison() {
     ? `\n\n机器建议:\n${state.translationTips.map((item, index) => `${index + 1}. ${item}`).join("\n")}`
     : "";
 
+  el.summaryOutput.textContent = level;
   el.liveInterpretingNote.value = `当前评分: ${score}%\n${level}${tips}`;
 
   renderProtectedOutputs();
@@ -612,17 +627,20 @@ function resetOutputForNewMedia() {
   state.sourceLanguage = "unknown";
   state.targetLanguage = "unknown";
   state.sourceRestatement = "";
+  state.sourceHints = "";
   state.machineTranslation = "";
   state.translationTips = [];
   state.hasRecordingStarted = false;
   state.hasRecordingCompleted = false;
 
   el.audioTranscript.value = "";
+  el.sourceHints.value = "";
   el.machineTranslation.value = "";
   el.audioTranscriptMirror.textContent = "暂无内容";
   el.targetLanguageLabel.textContent = "未生成";
+  el.sourceHintsStatus.textContent = "未生成";
   el.translationStatus.textContent = "待生成";
-  el.liveInterpretingNote.value = "等待评分完成。";
+  el.summaryOutput.textContent = "等待评分完成。";
   el.differenceList.textContent = "等待录音结束后自动对比。";
   el.compareScore.textContent = "相似度 --";
   refreshLanguagePanels();
@@ -688,12 +706,7 @@ async function requestChatJson({ apiBase, apiKey, model, messages }) {
       temperature: 0.2,
     });
     const content = result?.choices?.[0]?.message?.content || "{}";
-    const parsed = parseMaybeJson(content) || {};
-    if (result?.localFallback || result?.fallbackReason) {
-      parsed.local_fallback = true;
-      parsed.fallback_reason = String(result?.fallbackReason || parsed.fallback_reason || "网络异常");
-    }
-    return parsed;
+    return parseMaybeJson(content) || {};
   }
 
   const response = await fetch(`${apiBase.replace(/\/$/, "")}/chat/completions`, {
@@ -757,13 +770,13 @@ async function transcribeWithOpenAI(file, { apiBase, apiKey, model }) {
 }
 
 async function transcribeUploadedMedia() {
-  const apiKey = el.apiKey.value.trim() || "local";
-  const apiBase = el.apiBase.value.trim() || "http://127.0.0.1";
-  const modelName = el.modelName.value.trim() || "local-fallback";
+  const apiKey = el.apiKey.value.trim();
+  const apiBase = el.apiBase.value.trim();
+  const modelName = el.modelName.value.trim();
   const manualSourceText = el.manualSourceText.value.trim();
-  const hasDesktopFallback = Boolean(window.desktopBridge?.chatCompletion || window.pywebview?.api?.chat_completion);
+  const shouldGenerateHints = Boolean(el.generateHintsMode.checked);
 
-  if ((!el.apiBase.value.trim() || !el.modelName.value.trim()) && !hasDesktopFallback) {
+  if (!apiKey || !apiBase || !modelName) {
     el.uploadStatus.textContent = "请先填写 API 配置";
     return;
   }
@@ -773,7 +786,8 @@ async function transcribeUploadedMedia() {
     return;
   }
 
-  el.uploadStatus.textContent = "转写与重述中...";
+  el.uploadStatus.textContent = shouldGenerateHints ? "转写、重述与关键词提示生成中..." : "转写与重述中...";
+  el.sourceHintsStatus.textContent = shouldGenerateHints ? "生成中..." : "未启用";
 
   try {
     let sourceText = "";
@@ -833,13 +847,56 @@ async function transcribeUploadedMedia() {
     state.targetLanguage = getTargetLanguage(state.sourceLanguage);
     state.sourceRestatement = (restatement.restatement || sourceText).trim();
 
+    if (shouldGenerateHints) {
+      try {
+        const hintResult = await requestChatJson({
+          apiBase,
+          apiKey,
+          model: modelName,
+          messages: [
+            {
+              role: "system",
+              content: "You are a professional interpreter coach. Return strict JSON only.",
+            },
+            {
+              role: "user",
+              content: `The following source text is in ${state.sourceLanguage === "zh" ? "Chinese" : "English"}.
+
+Generate same-language keyword hints only, without translation, for long-form interpreting practice.
+
+Requirements:
+1. Split the source text by sentence meaning.
+2. Extract exactly one keyword from each sentence whenever possible.
+3. Prefer meaningful verbs first. If no strong verb is available, use a key noun, number, name, or other content word.
+4. Do not output full sentences or long phrases. Each hint should usually be a single word, and at most a very short phrase.
+5. Avoid function words such as is, are, of, in, to, the, a, an and similar low-information words.
+6. Keep the original sentence order across the whole text.
+7. Output one hint per line, preserving sentence order from top to bottom.
+
+Return JSON: {"language":"en|zh","hints":"..."}
+
+Source text:
+${sourceText}`,
+            },
+          ],
+        });
+
+        state.sourceHints = (hintResult.hints || "").trim();
+        el.sourceHintsStatus.textContent = state.sourceHints ? "已生成" : "为空";
+      } catch {
+        state.sourceHints = "";
+        el.sourceHintsStatus.textContent = "生成失败";
+      }
+    } else {
+      state.sourceHints = "";
+      el.sourceHintsStatus.textContent = "未启用";
+    }
+
     renderProtectedOutputs();
     refreshLanguagePanels();
     updateComparison();
 
-    el.uploadStatus.textContent = restatement.local_fallback
-      ? `源语重述已生成（本地模式：${restatement.fallback_reason || "网络异常"}）`
-      : "源语重述已生成";
+    el.uploadStatus.textContent = shouldGenerateHints ? "源语重述与关键词提示已生成" : "源语重述已生成";
   } catch (error) {
     if (isDeepSeekMode() && state.uploadedFile) {
       el.uploadStatus.textContent = `${error.message}（DeepSeek 不支持时已尝试本地 ASR 兜底）`;
@@ -851,17 +908,16 @@ async function transcribeUploadedMedia() {
 
 async function translateSourceRestatement() {
   const sourceText = (state.sourceRestatement || "").trim();
-  const apiKey = el.apiKey.value.trim() || "local";
-  const apiBase = el.apiBase.value.trim() || "http://127.0.0.1";
-  const modelName = el.modelName.value.trim() || "local-fallback";
-  const hasDesktopFallback = Boolean(window.desktopBridge?.chatCompletion || window.pywebview?.api?.chat_completion);
+  const apiKey = el.apiKey.value.trim();
+  const apiBase = el.apiBase.value.trim();
+  const modelName = el.modelName.value.trim();
 
   if (!sourceText) {
     el.translationStatus.textContent = "请先生成源语重述";
     return;
   }
 
-  if ((!el.apiBase.value.trim() || !el.modelName.value.trim()) && !hasDesktopFallback) {
+  if (!apiKey || !apiBase || !modelName) {
     el.translationStatus.textContent = "请先填写 API 配置";
     return;
   }
@@ -905,11 +961,7 @@ async function translateSourceRestatement() {
       throw new Error("机器译文为空，请重试");
     }
 
-    if (parsed.local_fallback) {
-      el.translationStatus.textContent = `已切换本地模式（${parsed.fallback_reason || "网络异常"}）`;
-    } else {
-      el.translationStatus.textContent = shouldHideOutputs() ? "已生成（防作弊模式暂不显示）" : "已生成";
-    }
+    el.translationStatus.textContent = shouldHideOutputs() ? "已生成（防作弊模式暂不显示）" : "已生成";
     renderProtectedOutputs();
     refreshLanguagePanels();
     updateComparison();
@@ -1064,38 +1116,6 @@ function setupDropzone() {
   });
 }
 
-function setupMirrorSyncScroll() {
-  const leftBox = el.audioTranscriptMirror;
-  const rightBox = el.liveTranscriptMirror;
-  if (!leftBox || !rightBox) {
-    return;
-  }
-
-  let syncingFrom = null;
-
-  const syncScroll = (source, target, sourceKey) => {
-    if (syncingFrom && syncingFrom !== sourceKey) {
-      return;
-    }
-
-    const sourceScrollable = source.scrollHeight - source.clientHeight;
-    const targetScrollable = target.scrollHeight - target.clientHeight;
-    if (sourceScrollable <= 0 || targetScrollable <= 0) {
-      return;
-    }
-
-    syncingFrom = sourceKey;
-    const ratio = source.scrollTop / sourceScrollable;
-    target.scrollTop = ratio * targetScrollable;
-    window.requestAnimationFrame(() => {
-      syncingFrom = null;
-    });
-  };
-
-  leftBox.addEventListener("scroll", () => syncScroll(leftBox, rightBox, "left"));
-  rightBox.addEventListener("scroll", () => syncScroll(rightBox, leftBox, "right"));
-}
-
 el.saveConfigBtn.addEventListener("click", saveConfig);
 el.providerPreset.addEventListener("change", () => {
   applyProviderPreset(el.providerPreset.value);
@@ -1187,7 +1207,6 @@ applyProviderPreset(el.providerPreset.value, { keepModel: true });
 loadApiKeyFromLocalFile();
 setupRecognition();
 setupDropzone();
-setupMirrorSyncScroll();
 setMicButtonRecordingState(false);
 refreshLanguagePanels();
 renderProtectedOutputs();
