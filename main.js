@@ -155,93 +155,6 @@ async function transcribeWithRetry({ apiBase, apiKey, model, fileName, mimeType,
   }
 }
 
-function inferLanguageFromText(text) {
-  const input = String(text || "");
-  const zhCount = (input.match(/[\u4e00-\u9fff]/g) || []).length;
-  const enCount = (input.match(/[a-zA-Z]/g) || []).length;
-  if (zhCount === 0 && enCount === 0) {
-    return "unknown";
-  }
-  return zhCount >= enCount ? "zh" : "en";
-}
-
-function extractSourceTextFromPrompt(content) {
-  const marker = "Source text:\n";
-  const text = String(content || "");
-  const index = text.lastIndexOf(marker);
-  if (index >= 0) {
-    return text.slice(index + marker.length).trim();
-  }
-  return text.trim();
-}
-
-function normalizeLocalRestatement(sourceText) {
-  return String(sourceText || "")
-    .replace(/\r\n/g, "\n")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-function buildLocalChatFallback(messages, remoteError) {
-  const fallbackReason = String(remoteError?.message || remoteError || "网络不可用");
-  const userMessage = [...(messages || [])]
-    .reverse()
-    .find((item) => item?.role === "user" && typeof item?.content === "string");
-  const prompt = userMessage?.content || "";
-  const sourceText = extractSourceTextFromPrompt(prompt);
-
-  let payload;
-  if (prompt.includes("Rewrite the following source speech in the SAME language")) {
-    const language = inferLanguageFromText(sourceText);
-    payload = {
-      language,
-      restatement: normalizeLocalRestatement(sourceText),
-      local_fallback: true,
-      fallback_reason: fallbackReason,
-    };
-  } else if (prompt.includes("Translate the source text")) {
-    const toChinese = prompt.includes("into natural Chinese");
-    payload = {
-      translation: toChinese
-        ? `【本地模式】网络异常，已自动切换本地流程并不中断训练。当前无法调用在线翻译模型，先展示源语重述供你继续口译：\n${normalizeLocalRestatement(sourceText)}`
-        : `[Local Mode] Network issue detected. Training continues without interruption. Online translation is unavailable, so source restatement is shown below:\n${normalizeLocalRestatement(sourceText)}`,
-      tips: [
-        "本地模式建议：先按意群短句口译，再逐步补全细节。",
-        "优先保留数字、专有名词和逻辑连接词，保证信息骨架不丢失。",
-        "网络恢复后可再次点击“生成机器译文”刷新标准答案。",
-      ],
-      local_fallback: true,
-      fallback_reason: fallbackReason,
-    };
-  } else {
-    payload = {
-      message: "本地模式兜底成功，流程继续运行。",
-      local_fallback: true,
-      fallback_reason: fallbackReason,
-    };
-  }
-
-  return {
-    id: "local-fallback",
-    object: "chat.completion",
-    created: Math.floor(Date.now() / 1000),
-    model: "local-fallback",
-    localFallback: true,
-    fallbackReason,
-    choices: [
-      {
-        index: 0,
-        message: {
-          role: "assistant",
-          content: JSON.stringify(payload),
-        },
-        finish_reason: "stop",
-      },
-    ],
-  };
-}
-
 ipcMain.handle("transcribe-audio", async (_, payload) => {
   return transcribeWithRetry(payload);
 });
@@ -256,30 +169,26 @@ ipcMain.handle("chat-completion", async (_, payload) => {
     temperature = 0.2,
   } = payload;
 
-  try {
-    const response = await fetch(`${apiBase.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        temperature,
-        response_format: responseFormatJson ? { type: "json_object" } : undefined,
-        messages,
-      }),
-    });
+  const response = await fetch(`${apiBase.replace(/\/$/, "")}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      temperature,
+      response_format: responseFormatJson ? { type: "json_object" } : undefined,
+      messages,
+    }),
+  });
 
-    if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(`文本生成失败：${response.status} ${detail}`);
-    }
-
-    return response.json();
-  } catch (error) {
-    return buildLocalChatFallback(messages, error);
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`文本生成失败：${response.status} ${detail}`);
   }
+
+  return response.json();
 });
 
 ipcMain.handle("read-local-api-key", async () => {

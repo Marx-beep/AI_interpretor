@@ -76,6 +76,11 @@
           <button id="translateAudioBtn" class="ghost-btn">生成机器译文</button>
         </div>
 
+        <label class="cheat-guard-toggle">
+          <input id="generateHintsMode" type="checkbox" />
+          <span>同时生成源语关键词提示（按句抽取，优先动词）</span>
+        </label>
+
         <article class="content-card compact-card">
           <div class="content-head">
             <h3>手动源语文本（DeepSeek转写兜底）</h3>
@@ -145,6 +150,14 @@
           <p class="hint">你应当用目标语做口译，系统会与机器标准译文进行相似度评分。</p>
         </div>
 
+        <article class="content-card compact-card">
+          <div class="content-head">
+            <h3>源语关键词提示</h3>
+            <span id="sourceHintsStatus">未生成</span>
+          </div>
+          <textarea id="sourceHints" placeholder="勾选后，这里会按句一行一个关键词显示，优先动词，其次名词、数字、专名。"></textarea>
+        </article>
+
         <article class="content-card">
           <div class="content-head">
             <h3>个人口译文本</h3>
@@ -155,7 +168,7 @@
 
         <article class="content-card compact-card">
           <div class="content-head">
-            <h3>训练反馈</h3>
+            <h3>识别语言</h3>
             <span id="liveDetectedLanguage" class="badge muted">未识别</span>
           </div>
           <textarea id="liveInterpretingNote" readonly placeholder="这里会显示训练反馈与建议。"></textarea>
@@ -175,6 +188,10 @@
           <article class="mini-card">
             <h3>差异提示</h3>
             <div id="differenceList" class="bullet-block">等待录音结束后自动对比。</div>
+          </article>
+          <article class="mini-card">
+            <h3>训练反馈</h3>
+            <div id="summaryOutput" class="bullet-block">等待评分完成。</div>
           </article>
         </div>
 
@@ -196,6 +213,45 @@
         </article>
       </section>
     </main>
+
+    <section class="dialogue-shell">
+      <div class="dialogue-stage">
+        <section class="dialogue-chat-panel">
+          <div class="dialogue-chat-head">
+            <div class="dialogue-chat-titlebar">
+              <div class="dialogue-title-main">
+                <p class="panel-kicker">Panel D</p>
+                <h2>角色对话口译训练</h2>
+              </div>
+              <div class="dialogue-title-status">
+                <strong id="dialogueTimer">00:00</strong>
+                <div class="dialogue-title-copy">
+                  <p id="dialogueTask" class="hint">先生成一个角色 A 中文、角色 B 英文的训练脚本。</p>
+                  <p id="dialoguePrompt" class="hint">支持滚动查看。训练中只显示进度提示，结束训练后才显示完整内容。</p>
+                </div>
+                <span id="dialogueStatus" class="badge muted">等待生成</span>
+              </div>
+            </div>
+
+            <div class="dialogue-chat-toolbar">
+              <label class="dialogue-topic-shell">
+                <span class="dialogue-topic-label">请输入对话主题</span>
+                <input id="dialogueTopic" class="dialogue-topic-input" placeholder="例如：机场接机、商务谈判、医院问诊、留学咨询" />
+              </label>
+              <div class="action-row dialogue-actions">
+                <button id="generateDialogueBtn">生成对话脚本</button>
+                <button id="startDialogueBtn" class="ghost-btn">开始训练</button>
+              </div>
+            </div>
+          </div>
+          <div id="dialogueTimeline" class="dialogue-timeline"></div>
+          <div class="dialogue-composer">
+            <button id="dialogueRecordBtn" class="dialogue-voice-btn mic-toggle-btn">点击开始口译录入</button>
+            <button id="endDialogueBtn" class="ghost-btn dialogue-end-btn">结束训练</button>
+          </div>
+        </section>
+      </div>
+    </section>
   </div>
 
   <script src="./app.js"></script>
