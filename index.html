@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 ﻿<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -52,6 +53,85 @@
             <h2>上传原始音频</h2>
           </div>
           <span id="uploadStatus" class="badge">等待上传</span>
+=======
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI 同声口译台</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&family=Outfit:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">AI INTERPRETING CONSOLE</p>
+        <h1>中英双向口译训练台</h1>
+        <p class="hero-copy">上传音频或视频后，系统自动完成源语重述与机器标准译文。你用麦克风完成个人口译，录音结束后再揭晓标准答案与准确度评分。</p>
+      </div>
+      <section class="config-card">
+        <h2>模型配置</h2>
+        <div class="config-grid">
+          <label>
+            供应商预设
+            <select id="providerPreset">
+              <option value="openai">OpenAI</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="dashscope">阿里云百炼（DashScope）</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="custom">自定义</option>
+            </select>
+          </label>
+          <label>
+            API Base URL
+            <input id="apiBase" placeholder="https://api.openai.com/v1" />
+          </label>
+          <label>
+            API Key
+            <input id="apiKey" type="password" placeholder="sk-..." />
+          </label>
+          <label>
+            统一模型（转写+重述+翻译）
+            <input id="modelName" list="modelOptions" placeholder="例如 gpt-4o-mini-transcribe" />
+            <datalist id="modelOptions"></datalist>
+          </label>
+        </div>
+        <p id="providerHint" class="hint">选择供应商后将自动填充推荐 URL 与模型。</p>
+        <div class="config-actions">
+          <button id="saveConfigBtn" class="ghost-btn">保存本地配置</button>
+          <button id="testConfigBtn" class="ghost-btn">测试 API</button>
+          <span id="configStatus" class="status-text">未保存</span>
+        </div>
+      </section>
+    </header>
+
+    <main class="workspace">
+      <section class="panel panel-audio">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">Panel A</p>
+            <h2>上传音频/视频</h2>
+          </div>
+          <span id="uploadStatus" class="badge">等待上传</span>
+        </div>
+
+        <label class="upload-dropzone" for="mediaFileInput">
+          <input id="mediaFileInput" type="file" accept="audio/*,video/*" hidden />
+          <strong>点击或拖拽音频/视频到这里</strong>
+          <span>支持 mp3/mp4/m4a/wav/webm 等格式。</span>
+        </label>
+
+        <audio id="audioPlayer" controls class="audio-player" hidden></audio>
+        <video id="videoPlayer" controls class="audio-player" hidden></video>
+
+        <div class="action-row">
+          <button id="transcribeAudioBtn">生成源语重述</button>
+          <button id="translateAudioBtn" class="ghost-btn">生成机器译文</button>
+>>>>>>> Stashed changes
         </div>
 
         <label class="upload-dropzone" for="audioFileInput">
@@ -95,6 +175,7 @@
             <button id="stopMicBtn" class="ghost-btn">停止</button>
             <button id="clearMicBtn" class="ghost-btn">清空</button>
           </div>
+<<<<<<< Updated upstream
           <p class="hint">优先使用浏览器语音识别；若浏览器不支持，可先录音再接入后端流式 ASR。</p>
         </div>
 
@@ -106,6 +187,19 @@
           <textarea id="liveTranscript" placeholder="点击开始录入，英文识别内容会实时追加在这里。"></textarea>
         </article>
 
+=======
+          <p class="hint">桌面版使用本地录音：点击开始，口译完成后再次点击停止，等待约数秒生成文本并评分。</p>
+        </div>
+
+        <article class="content-card">
+          <div class="content-head">
+            <h3>个人口译文本</h3>
+            <span id="liveWordCount">0 tokens</span>
+          </div>
+          <textarea id="liveTranscript" placeholder="点击开始录入；再次点击停止后，本地转写文本会显示在这里。"></textarea>
+        </article>
+
+>>>>>>> Stashed changes
         <article class="content-card compact-card">
           <div class="content-head">
             <h3>即时中文口译</h3>

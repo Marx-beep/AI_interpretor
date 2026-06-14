@@ -8,6 +8,50 @@ const state = {
   isRecognizing: false,
   timerId: null,
   recordingSeconds: 0,
+<<<<<<< Updated upstream
+=======
+  translationTips: [],
+  micStream: null,
+  mediaRecorder: null,
+  micChunks: [],
+  micMode: "speech",
+  switchingToLocalMic: false,
+  isProcessingSource: false,
+  isTranscribingMic: false,
+};
+
+const providerPresets = {
+  openai: {
+    name: "OpenAI",
+    apiBase: "https://api.openai.com/v1",
+    models: ["gpt-4o-mini-transcribe", "gpt-4o-transcribe", "whisper-1"],
+    hint: "官方推荐：语音转写可用 gpt-4o-mini-transcribe 或 whisper-1。",
+  },
+  deepseek: {
+    name: "DeepSeek",
+    apiBase: "https://api.deepseek.com",
+    models: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"],
+    hint: "DeepSeek 仅负责重述与翻译；上传音视频和麦克风录音会使用本机 Whisper 转写。手动源语文本优先于上传媒体。",
+  },
+  dashscope: {
+    name: "阿里云百炼",
+    apiBase: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    models: ["qwen-plus", "qwen-turbo", "qwen-max"],
+    hint: "使用百炼 OpenAI 兼容模式；请在阿里云侧开通对应模型。",
+  },
+  openrouter: {
+    name: "OpenRouter",
+    apiBase: "https://openrouter.ai/api/v1",
+    models: ["openai/gpt-4o-mini-transcribe", "deepseek/deepseek-chat"],
+    hint: "OpenRouter 为聚合网关，模型可按账号权限使用。",
+  },
+  custom: {
+    name: "自定义",
+    apiBase: "",
+    models: [],
+    hint: "可手动填写 OpenAI 兼容网关 URL 与模型。",
+  },
+>>>>>>> Stashed changes
 };
 
 const el = {
@@ -16,6 +60,7 @@ const el = {
   transcriptionModel: document.getElementById("transcriptionModel"),
   chatModel: document.getElementById("chatModel"),
   saveConfigBtn: document.getElementById("saveConfigBtn"),
+  testConfigBtn: document.getElementById("testConfigBtn"),
   configStatus: document.getElementById("configStatus"),
   audioFileInput: document.getElementById("audioFileInput"),
   audioPlayer: document.getElementById("audioPlayer"),
@@ -41,6 +86,175 @@ const el = {
   recordingTimer: document.getElementById("recordingTimer"),
 };
 
+<<<<<<< Updated upstream
+=======
+function setMicButtonRecordingState(isRecording) {
+  if (!el.startMicBtn) {
+    return;
+  }
+  el.startMicBtn.classList.toggle("is-recording", isRecording);
+  el.startMicBtn.textContent = isRecording ? "录制中 · 点击停止" : "开始录入";
+}
+
+function setMicMode(mode) {
+  state.micMode = mode;
+  if (mode === "local") {
+    el.micStatus.textContent = "本地录音模式（语音识别网络异常时兜底）";
+    el.micStatus.classList.add("muted");
+  }
+}
+
+async function ensureMicStream() {
+  if (state.micStream) {
+    return state.micStream;
+  }
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error("当前环境不支持麦克风权限接口");
+  }
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  state.micStream = stream;
+  return stream;
+}
+
+async function transcribeMicBlob(blob) {
+  const apiKey = el.apiKey.value.trim() || "local";
+  const apiBase = el.apiBase.value.trim() || "http://127.0.0.1";
+  const modelName = el.modelName.value.trim() || "local-fallback";
+
+  const arrayBuffer = await blob.arrayBuffer();
+  const isMp4 = String(blob.type || "").includes("mp4");
+  const result = await callDesktopTranscribe({
+    apiBase,
+    apiKey,
+    model: modelName,
+    fileName: isMp4 ? "mic-input.m4a" : "mic-input.webm",
+    mimeType: blob.type || "audio/webm",
+    languageHint: resolveMicRecognitionLang().startsWith("zh") ? "zh" : "en",
+    bytes: Array.from(new Uint8Array(arrayBuffer)),
+  });
+
+  const text = (result?.text || "").trim();
+  if (!text) {
+    throw new Error("麦克风录音转写为空");
+  }
+  const normalizedLanguage = normalizeLanguageCode(result?.language);
+  return {
+    text,
+    language: normalizedLanguage === "unknown" ? inferLanguageFromText(text) : normalizedLanguage,
+  };
+}
+
+async function startLocalMicRecording() {
+  if (state.isTranscribingMic) {
+    throw new Error("上一段录音仍在转写，请等待完成");
+  }
+  const stream = await ensureMicStream();
+  const preferredType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"]
+    .find((type) => MediaRecorder.isTypeSupported(type)) || "";
+  const recorder = preferredType
+    ? new MediaRecorder(stream, { mimeType: preferredType })
+    : new MediaRecorder(stream);
+  state.mediaRecorder = recorder;
+  state.micChunks = [];
+  state.hasRecordingCompleted = false;
+
+  recorder.onstart = () => {
+    state.switchingToLocalMic = false;
+    state.isRecognizing = true;
+    state.hasRecordingStarted = true;
+    el.micStatus.textContent = "麦克风录音中（本地转写）";
+    el.micStatus.classList.remove("muted");
+    setMicButtonRecordingState(true);
+    startTimer();
+  };
+
+  recorder.ondataavailable = (event) => {
+    if (event.data && event.data.size > 0) {
+      state.micChunks.push(event.data);
+    }
+  };
+
+  recorder.onerror = (event) => {
+    state.isRecognizing = false;
+    stopTimer();
+    setMicButtonRecordingState(false);
+    el.micStatus.textContent = `录音异常: ${event.error?.name || "unknown"}`;
+    el.micStatus.classList.add("muted");
+  };
+
+  recorder.onstop = async () => {
+    state.isRecognizing = false;
+    stopTimer();
+    setMicButtonRecordingState(false);
+    el.micStatus.textContent = "录音已停止，正在本地转写...";
+    el.micStatus.classList.remove("muted");
+    state.isTranscribingMic = true;
+    el.startMicBtn.disabled = true;
+    el.clearMicBtn.disabled = true;
+
+    try {
+      if (state.micChunks.length === 0) {
+        throw new Error("未采集到录音数据，请检查麦克风权限");
+      }
+      const blob = new Blob(state.micChunks, { type: preferredType });
+      const parsed = await transcribeMicBlob(blob);
+      const base = el.liveTranscript.dataset.finalText || "";
+      el.liveTranscript.dataset.finalText = `${base}${parsed.text} `;
+      el.liveTranscript.value = el.liveTranscript.dataset.finalText.trim();
+      state.liveTranscript = el.liveTranscript.value;
+      state.liveDetectedLanguage = parsed.language === "unknown" ? inferLanguageFromText(parsed.text) : parsed.language;
+      state.hasRecordingCompleted = true;
+      el.micStatus.textContent = "麦克风已停止（本地转写完成）";
+      el.micStatus.classList.add("muted");
+      refreshLanguagePanels();
+      renderProtectedOutputs();
+      updateComparison();
+    } catch (error) {
+      el.micStatus.textContent = `本地转写失败: ${error.message}`;
+      el.micStatus.classList.add("muted");
+    } finally {
+      state.isTranscribingMic = false;
+      el.startMicBtn.disabled = false;
+      el.clearMicBtn.disabled = false;
+    }
+  };
+
+  recorder.start(1000);
+}
+
+function stopCurrentMicCapture() {
+  if (state.micMode === "local") {
+    if (state.mediaRecorder && state.mediaRecorder.state !== "inactive") {
+      state.mediaRecorder.stop();
+    }
+    return;
+  }
+  state.recognition?.stop();
+}
+
+function refreshProviderModelOptions(providerKey) {
+  const preset = providerPresets[providerKey] || providerPresets.custom;
+  el.modelOptions.innerHTML = "";
+  preset.models.forEach((model) => {
+    const option = document.createElement("option");
+    option.value = model;
+    el.modelOptions.appendChild(option);
+  });
+  el.providerHint.textContent = preset.hint;
+}
+
+function applyProviderPreset(providerKey, { keepModel = false } = {}) {
+  const preset = providerPresets[providerKey] || providerPresets.custom;
+  if (preset.apiBase) {
+    el.apiBase.value = preset.apiBase;
+  }
+  refreshProviderModelOptions(providerKey);
+  if (!keepModel && preset.models.length > 0) {
+    el.modelName.value = preset.models[0];
+  }
+}
+
+>>>>>>> Stashed changes
 function loadConfig() {
   const saved = localStorage.getItem(storageKey);
   if (!saved) {
@@ -73,6 +287,7 @@ function saveConfig() {
   el.configStatus.textContent = "已保存到浏览器本地";
 }
 
+<<<<<<< Updated upstream
 function wordCount(text) {
   const trimmed = text.trim();
   return trimmed ? trimmed.split(/\s+/).length : 0;
@@ -83,6 +298,45 @@ function setTextMetrics() {
   el.liveWordCount.textContent = `${wordCount(el.liveTranscript.value)} words`;
   el.audioTranscriptMirror.textContent = el.audioTranscript.value || "暂无内容";
   el.liveTranscriptMirror.textContent = el.liveTranscript.value || "暂无内容";
+=======
+async function testApiConfig() {
+  const apiKey = el.apiKey.value.trim();
+  const apiBase = el.apiBase.value.trim();
+  const model = el.modelName.value.trim();
+  if (!apiKey || !apiBase || !model) {
+    el.configStatus.textContent = "请完整填写 API Base、API Key 和模型";
+    return;
+  }
+
+  el.testConfigBtn.disabled = true;
+  el.configStatus.textContent = "正在测试 API...";
+  try {
+    const parsed = await requestChatJson({
+      apiBase,
+      apiKey,
+      model,
+      messages: [
+        { role: "system", content: "Return strict JSON only." },
+        { role: "user", content: 'Return exactly {"status":"ok"}.' },
+      ],
+    });
+    if (parsed.status !== "ok") {
+      throw new Error("模型已响应，但未返回预期 JSON；请检查所选模型是否支持 JSON 输出");
+    }
+    saveConfig();
+    el.configStatus.textContent = "API 测试成功，配置已保存";
+  } catch (error) {
+    el.configStatus.textContent = `API 测试失败：${error.message}`;
+  } finally {
+    el.testConfigBtn.disabled = false;
+  }
+}
+
+function isDeepSeekMode() {
+  const apiBase = el.apiBase.value.trim().toLowerCase();
+  const model = el.modelName.value.trim().toLowerCase();
+  return apiBase.includes("api.deepseek.com") || model.includes("deepseek");
+>>>>>>> Stashed changes
 }
 
 function formatTime(totalSeconds) {
@@ -166,6 +420,7 @@ async function transcribeUploadedAudio() {
     return;
   }
 
+<<<<<<< Updated upstream
   const apiKey = el.apiKey.value.trim();
   const apiBase = el.apiBase.value.trim();
   const model = el.transcriptionModel.value.trim();
@@ -197,11 +452,161 @@ async function transcribeUploadedAudio() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+=======
+function parseMaybeJson(content) {
+  if (typeof content === "object" && content !== null) {
+    return content;
+  }
+  if (typeof content !== "string") {
+    return null;
+  }
+  try {
+    return JSON.parse(content);
+  } catch {
+    const fenced = content.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
+    const candidate = fenced || content.match(/\{[\s\S]*\}/)?.[0];
+    if (!candidate) {
+      return null;
+    }
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      return null;
+    }
+  }
+}
+
+async function requestChatJson({ apiBase, apiKey, model, messages }) {
+  if (window.desktopBridge?.chatCompletion || window.pywebview?.api?.chat_completion) {
+    const result = await callDesktopChatCompletion({
+      apiBase,
+      apiKey,
+      model,
+      messages,
+      responseFormatJson: true,
+      temperature: 0.2,
+    });
+    const content = result?.choices?.[0]?.message?.content || "{}";
+    const parsed = parseMaybeJson(content);
+    if (!parsed) {
+      throw new Error("模型返回内容不是有效 JSON，请重试或更换模型");
+    }
+    if (result?.localFallback || result?.fallbackReason) {
+      parsed.local_fallback = true;
+      parsed.fallback_reason = String(result?.fallbackReason || parsed.fallback_reason || "网络异常");
+    }
+    return parsed;
+  }
+
+  const response = await fetch(`${apiBase.replace(/\/$/, "")}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.2,
+      response_format: { type: "json_object" },
+      messages,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`文本模型调用失败：${response.status}`);
+  }
+
+  const result = await response.json();
+  const content = result?.choices?.[0]?.message?.content || "{}";
+  const parsed = parseMaybeJson(content);
+  if (!parsed) {
+    throw new Error("模型返回内容不是有效 JSON，请重试或更换模型");
+  }
+  return parsed;
+}
+
+async function transcribeWithOpenAI(file, { apiBase, apiKey, model }) {
+  const endpoint = `${apiBase.replace(/\/$/, "")}/audio/transcriptions`;
+
+  async function runRequest(responseFormat) {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("model", model);
+    formData.append("response_format", responseFormat);
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`转写失败：${response.status} ${text}`);
+    }
+
+    return responseFormat === "text" ? { text: await response.text() } : response.json();
+  }
+
+  const is4oTranscribe = /gpt-4o(-mini)?-transcribe/i.test(model);
+  if (is4oTranscribe) {
+    return runRequest("json");
+  }
+
+  try {
+    return await runRequest("verbose_json");
+  } catch {
+    return runRequest("json");
+  }
+}
+
+async function transcribeUploadedMedia() {
+  if (state.isProcessingSource) {
+    el.uploadStatus.textContent = "源语重述正在处理中，请等待当前任务完成";
+    return;
+  }
+  const apiKey = el.apiKey.value.trim() || "local";
+  const apiBase = el.apiBase.value.trim() || "http://127.0.0.1";
+  const modelName = el.modelName.value.trim() || "local-fallback";
+  const manualSourceText = el.manualSourceText.value.trim();
+
+  if (!el.apiBase.value.trim() || !el.apiKey.value.trim() || !el.modelName.value.trim()) {
+    el.uploadStatus.textContent = "请先完整填写并测试 API Base、API Key 和模型";
+    return;
+  }
+
+  if (!state.uploadedFile && !manualSourceText) {
+    el.uploadStatus.textContent = "请先上传媒体，或在“手动源语文本”里输入内容";
+    return;
+  }
+
+  el.uploadStatus.textContent = "转写与重述中...";
+  state.isProcessingSource = true;
+  el.transcribeAudioBtn.disabled = true;
+  el.translateAudioBtn.disabled = true;
+
+  try {
+    let sourceText = "";
+    let rawLanguage = "unknown";
+
+    if (manualSourceText) {
+      sourceText = manualSourceText;
+      el.uploadStatus.textContent = "正在使用手动源语文本生成重述...";
+    } else if (state.uploadedFile) {
+      let transcriptResult;
+      if (window.desktopBridge?.transcribeAudio || window.pywebview?.api?.transcribe_audio) {
+        el.uploadStatus.textContent = "正在本地转写音频，请稍候...";
+        const arrayBuffer = await state.uploadedFile.arrayBuffer();
+        transcriptResult = await callDesktopTranscribe({
+>>>>>>> Stashed changes
           apiBase,
           apiKey,
           model,
           fileName: state.uploadedFile.name,
           mimeType: state.uploadedFile.type,
+          languageHint: "",
           bytes: Array.from(new Uint8Array(arrayBuffer)),
         }),
       });
@@ -210,7 +615,50 @@ async function transcribeUploadedAudio() {
         throw new Error(`转写失败：${response.status}`);
       }
 
+<<<<<<< Updated upstream
       result = await response.json();
+=======
+    if (!sourceText) {
+      throw new Error("未获取到有效源语文本。你可以在“手动源语文本”中粘贴内容后重试。");
+    }
+
+    state.sourceLanguage = rawLanguage === "unknown" ? inferLanguageFromText(sourceText) : rawLanguage;
+    state.targetLanguage = getTargetLanguage(state.sourceLanguage);
+    el.uploadStatus.textContent = "音频转写完成，正在调用 DeepSeek 生成重述...";
+
+    const restatement = await requestChatJson({
+      apiBase,
+      apiKey,
+      model: modelName,
+      messages: [
+        {
+          role: "system",
+          content: "You are a professional interpreter assistant. Return strict JSON only.",
+        },
+        {
+          role: "user",
+          content: `Rewrite the following source speech in the SAME language without translating. Keep meaning faithful and expression natural. Return JSON: {"language":"en|zh","restatement":"..."}.\n\nSource text:\n${sourceText}`,
+        },
+      ],
+    });
+
+    state.sourceLanguage = normalizeLanguageCode(restatement.language) !== "unknown"
+      ? normalizeLanguageCode(restatement.language)
+      : state.sourceLanguage;
+    state.targetLanguage = getTargetLanguage(state.sourceLanguage);
+    state.sourceRestatement = (restatement.restatement || sourceText).trim();
+
+    renderProtectedOutputs();
+    refreshLanguagePanels();
+    updateComparison();
+
+    el.uploadStatus.textContent = restatement.local_fallback
+      ? `源语重述已生成（本地模式：${restatement.fallback_reason || "网络异常"}）`
+      : "源语重述已生成";
+  } catch (error) {
+    if (isDeepSeekMode() && state.uploadedFile) {
+      el.uploadStatus.textContent = `${error.message}（DeepSeek 不支持时已尝试本地 ASR 兜底）`;
+>>>>>>> Stashed changes
     } else {
       const formData = new FormData();
       formData.append("file", state.uploadedFile);
@@ -232,6 +680,7 @@ async function transcribeUploadedAudio() {
 
       result = await response.json();
     }
+<<<<<<< Updated upstream
     el.audioTranscript.value = result.text || "";
     state.audioTranscript = el.audioTranscript.value;
     el.uploadStatus.textContent = "转写完成";
@@ -247,14 +696,33 @@ async function translateAndSummarize() {
   const apiKey = el.apiKey.value.trim();
   const apiBase = el.apiBase.value.trim();
   const model = el.chatModel.value.trim();
+=======
+  } finally {
+    state.isProcessingSource = false;
+    el.transcribeAudioBtn.disabled = false;
+    el.translateAudioBtn.disabled = false;
+  }
+}
+
+async function translateSourceRestatement() {
+  const sourceText = (state.sourceRestatement || "").trim();
+  const apiKey = el.apiKey.value.trim() || "local";
+  const apiBase = el.apiBase.value.trim() || "http://127.0.0.1";
+  const modelName = el.modelName.value.trim() || "local-fallback";
+>>>>>>> Stashed changes
 
   if (!sourceText) {
     el.translationStatus.textContent = "缺少英文文本";
     return;
   }
 
+<<<<<<< Updated upstream
   if (!apiKey || !apiBase || !model) {
     el.translationStatus.textContent = "请先填写 API 配置";
+=======
+  if (!el.apiBase.value.trim() || !el.apiKey.value.trim() || !el.modelName.value.trim()) {
+    el.translationStatus.textContent = "请先完整填写并测试 API Base、API Key 和模型";
+>>>>>>> Stashed changes
     return;
   }
 
@@ -327,6 +795,12 @@ async function translateAndSummarize() {
 }
 
 function setupRecognition() {
+  if (window.desktopBridge?.transcribeAudio) {
+    setMicMode("local");
+    el.micStatus.textContent = "本地录音模式（停止后约数秒生成文本）";
+    return;
+  }
+
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
     el.micStatus.textContent = "当前浏览器不支持语音识别";
@@ -347,6 +821,9 @@ function setupRecognition() {
   };
 
   recognition.onend = () => {
+    if (state.switchingToLocalMic) {
+      return;
+    }
     state.isRecognizing = false;
     stopTimer();
     if (el.micStatus.textContent === "麦克风录入中") {
@@ -357,8 +834,31 @@ function setupRecognition() {
 
   recognition.onerror = (event) => {
     state.isRecognizing = false;
+<<<<<<< Updated upstream
     el.micStatus.textContent = `识别异常: ${event.error}`;
     el.micStatus.classList.add("muted");
+=======
+    stopTimer();
+    if (event.error === "network") {
+      state.switchingToLocalMic = true;
+      el.micStatus.textContent = "在线识别不可用，正在自动切换到本地录音...";
+      setMicMode("local");
+      window.setTimeout(() => {
+        startLocalMicRecording().catch((error) => {
+          state.switchingToLocalMic = false;
+          el.micStatus.textContent = `本地录音启动失败: ${error.message}`;
+          el.micStatus.classList.add("muted");
+          setMicButtonRecordingState(false);
+        });
+      }, 300);
+    } else {
+      el.micStatus.textContent = `识别异常: ${event.error}`;
+      setMicButtonRecordingState(false);
+    }
+    el.micStatus.classList.add("muted");
+    renderProtectedOutputs();
+    updateComparison();
+>>>>>>> Stashed changes
   };
 
   recognition.onresult = (event) => {
@@ -423,6 +923,7 @@ function setupDropzone() {
 }
 
 el.saveConfigBtn.addEventListener("click", saveConfig);
+<<<<<<< Updated upstream
 el.audioFileInput.addEventListener("change", (event) => handleFileSelect(event.target.files?.[0]));
 el.transcribeAudioBtn.addEventListener("click", transcribeUploadedAudio);
 el.translateAudioBtn.addEventListener("click", translateAndSummarize);
@@ -430,6 +931,45 @@ el.runCompareBtn.addEventListener("click", updateComparison);
 
 el.startMicBtn.addEventListener("click", () => {
   if (!state.recognition || state.isRecognizing) {
+=======
+el.testConfigBtn.addEventListener("click", testApiConfig);
+el.providerPreset.addEventListener("change", () => {
+  applyProviderPreset(el.providerPreset.value);
+  el.configStatus.textContent = "已切换供应商预设（可手动调整）";
+});
+
+el.apiBase.addEventListener("input", () => {
+  const matched = Object.entries(providerPresets).find(([, preset]) => preset.apiBase && preset.apiBase === el.apiBase.value.trim());
+  if (!matched) {
+    el.providerPreset.value = "custom";
+    refreshProviderModelOptions("custom");
+  }
+});
+
+el.mediaFileInput.addEventListener("change", (event) => handleFileSelect(event.target.files?.[0]));
+el.transcribeAudioBtn.addEventListener("click", transcribeUploadedMedia);
+el.translateAudioBtn.addEventListener("click", translateSourceRestatement);
+el.runCompareBtn.addEventListener("click", updateComparison);
+
+el.startMicBtn.addEventListener("click", () => {
+  if (state.isRecognizing) {
+    stopCurrentMicCapture();
+    state.isRecognizing = false;
+    stopTimer();
+    setMicButtonRecordingState(false);
+    if (state.micMode === "local") {
+      el.micStatus.textContent = "录音已停止，正在准备本地转写...";
+      el.micStatus.classList.remove("muted");
+    } else {
+      if (state.hasRecordingStarted) {
+        state.hasRecordingCompleted = true;
+      }
+      el.micStatus.textContent = "麦克风已停止";
+      el.micStatus.classList.add("muted");
+      renderProtectedOutputs();
+      updateComparison();
+    }
+>>>>>>> Stashed changes
     return;
   }
   state.recordingSeconds = 0;
@@ -450,6 +990,14 @@ el.stopMicBtn.addEventListener("click", () => {
 });
 
 el.clearMicBtn.addEventListener("click", () => {
+<<<<<<< Updated upstream
+=======
+  if (state.isTranscribingMic) {
+    el.micStatus.textContent = "录音仍在转写，请等待完成后再清空";
+    return;
+  }
+  stopCurrentMicCapture();
+>>>>>>> Stashed changes
   el.liveTranscript.value = "";
   el.liveTranscript.dataset.finalText = "";
   state.liveTranscript = "";
